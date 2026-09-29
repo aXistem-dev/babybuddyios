@@ -7,6 +7,9 @@ import Foundation
 enum StashCapability {
     private static let supportedKey = "stashSupported"
     private static let summaryKey = "stashSummary"
+    /// Whether the negative-balance warning was dismissed. It belongs to the server's stash, so
+    /// ``reset()`` forgets it with the rest.
+    static let negativeWarningDismissedKey = "stashNegativeWarningDismissed"
 
     /// The API root keys a server with the milk stash lists.
     static let rootKeys = ["parents", "stash-adjustments", "stash"]
@@ -36,9 +39,11 @@ enum StashCapability {
         }
     }
 
-    /// Forget both, e.g. on sign-out, so the next server starts from "not supported".
+    /// Forget both, and a dismissed negative-balance warning, e.g. on sign-out, so the next server
+    /// starts from "not supported" and shows its own warning.
     static func reset() {
         SharedDefaults.suite.removeObject(forKey: supportedKey)
         SharedDefaults.suite.removeObject(forKey: summaryKey)
+        SharedDefaults.suite.removeObject(forKey: negativeWarningDismissedKey)
     }
 }

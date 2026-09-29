@@ -289,14 +289,14 @@ final class LocalAlerts {
         let timersOn = ForgottenTimerPolicy.isEnabled, dosesOn = MedicationReminderPolicy.isEnabled
         let checksOn = SickMode.checkHours > 0 && !SickModeStore.shared.active.isEmpty
         let stashOn = StashCapability.isSupported && StashAgePolicy.isEnabled
-        let now = Date()
         let wanted = timersOn || dosesOn || checksOn ? wantedRequests() : (timers: [], doses: [], checks: [])
-        let stash = stashOn ? StashAgePolicy.requests(from: StashCapability.summary, now: now) : []
+        // Every lot in the stash wants at least its "throw it away" alert.
+        let stashWanted = stashOn && !(StashCapability.summary?.lots.isEmpty ?? true)
         // The setting can arrive on before permission was ever asked (a restored App Group
         // default); ask now rather than schedule alerts that can never show. Temperature checks and
         // milk age alerts are on by default, so they ask the first time one is wanted: sick mode on
         // with a fever, or milk in the stash.
-        if timersOn || dosesOn || !wanted.checks.isEmpty || !stash.isEmpty,
+        if timersOn || dosesOn || !wanted.checks.isEmpty || stashWanted,
            await center.notificationSettings().authorizationStatus == .notDetermined {
             _ = await requestAuthorization()
         }
@@ -307,6 +307,9 @@ final class LocalAlerts {
                 return (request.identifier, date)
             })
         let delivered = Set(await center.deliveredNotifications().map(\.request.identifier))
+        // Read after the awaits above: a permission prompt can wait on the user.
+        let now = Date()
+        let stash = stashOn ? StashAgePolicy.requests(from: StashCapability.summary, now: now) : []
 
         // A dose reminder or temperature check that is already overdue when first seen (an old
         // dose, or the app opened long after) says nothing useful, so only timers fire late — and

@@ -51,20 +51,23 @@ final class SignOutWipeTests: XCTestCase {
         XCTAssertNil(SharedDefaults.selectedChildID)
     }
 
-    /// Whether the server had the milk stash, and its cached summary, belong to the server being
-    /// left: the next one starts from "not supported" until its own API root says otherwise.
+    /// Whether the server had the milk stash, its cached summary and a dismissed negative-balance
+    /// warning belong to the server being left: the next one starts from "not supported" until its
+    /// own API root says otherwise.
     func testSignOutResetsStashCapability() throws {
         StashCapability.update(rootJSON: Data(#"{"parents":"x","stash-adjustments":"x","stash":"x"}"#.utf8))
         StashCapability.store(summary: StashSummaryDTO(
             balance: 50, status: .ok, warn_age_hours: 48, max_age_hours: 72,
             oldest: nil, oldest_age_hours: nil, lots: [],
             defaults: .init(pumping_to_stash: true, bottle_from_stash: true)))
+        StashNegativeWarning.isDismissed = true
         XCTAssertTrue(StashCapability.isSupported)
 
         AppSession(context: context).signOut()
 
         XCTAssertFalse(StashCapability.isSupported)
         XCTAssertNil(StashCapability.summary)
+        XCTAssertFalse(StashNegativeWarning.isDismissed, "The next server shows its own warning")
     }
 
     /// The same server typed with a trailing slash or different casing must *not* count as a

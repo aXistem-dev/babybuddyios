@@ -162,10 +162,12 @@ enum DemoData {
             (4022, 8.0, .discarded, 5, "", 1, nil),
         ]
         for a in adjustments {
+            let parent: Any = a.parent.map { $0 as Any } ?? NSNull()
+            let feeding: Any = a.feeding.map { $0 as Any } ?? NSNull()
             insert(.stashAdjustment, id: a.id, [
                 "id": a.id, "time": iso(a.hoursAgo), "amount": a.amount, "kind": a.kind.rawValue,
                 "reason": a.reason, "signed_amount": a.kind.sign * a.amount,
-                "parent": a.parent.map { $0 as Any } ?? NSNull(), "feeding": a.feeding.map { $0 as Any } ?? NSNull(),
+                "parent": parent, "feeding": feeding,
                 "notes": "", "tags": [],
             ], context)
         }

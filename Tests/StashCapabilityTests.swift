@@ -63,4 +63,31 @@ final class StashCapabilityTests: XCTestCase {
         StashCapability.store(summary: s)
         XCTAssertEqual(StashCapability.summary, s)
     }
+
+    /// A sync compares the cached summary, whose dates the cache keeps in whole seconds, with the
+    /// server's, which can carry microseconds and fresh age readings. The same stash is no change;
+    /// a different amount is.
+    func testSameSummaryWithFractionalSecondsIsNotAChange() {
+        func summary(time: Date, amount: Double, age: Double) -> StashSummaryDTO {
+            let lot = StashLotDTO(time: time, amount: amount, throw_away_amount: amount, age_hours: age,
+                                  warn_at: time.addingTimeInterval(48 * 3600),
+                                  expires_at: time.addingTimeInterval(72 * 3600),
+                                  status: .warn, is_oldest_expired: false)
+            return StashSummaryDTO(balance: amount, status: .warn, warn_age_hours: 48, max_age_hours: 72,
+                                   oldest: time, oldest_age_hours: age, lots: [lot],
+                                   defaults: .init(pumping_to_stash: true, bottle_from_stash: true))
+        }
+        let time = Date(timeIntervalSince1970: 1_790_000_000.654321)
+        let fresh = summary(time: time, amount: 60, age: 50.25)
+        StashCapability.store(summary: fresh)
+        let cached = StashCapability.summary
+        XCTAssertNotNil(cached)
+
+        XCTAssertFalse(SyncActor.stashSummaryChanged(from: cached, to: fresh))
+        XCTAssertFalse(SyncActor.stashSummaryChanged(from: cached, to: summary(time: time, amount: 60, age: 50.5)),
+                       "Only the age moved")
+        XCTAssertTrue(SyncActor.stashSummaryChanged(from: cached, to: summary(time: time, amount: 45, age: 50.25)))
+        XCTAssertTrue(SyncActor.stashSummaryChanged(from: nil, to: fresh))
+        XCTAssertFalse(SyncActor.stashSummaryChanged(from: nil, to: nil))
+    }
 }
