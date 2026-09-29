@@ -59,6 +59,15 @@ enum EntityFormatting {
             return [p["name"] as? String, dosage(entity)].compactMap { $0 }.joined(separator: " · ")
         case .child:
             return nil
+        case .parent:
+            return [p["first_name"] as? String, p["last_name"] as? String]
+                .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+        case .stashAdjustment:
+            var parts: [String] = []
+            if let kind = (p["kind"] as? String).flatMap(StashKind.init(rawValue:)) { parts.append(kind.label) }
+            if let a = p["amount"] as? Double { parts.append(formatAmount(a)) }
+            if let reason = p["reason"] as? String, !reason.isEmpty { parts.append(reason) }
+            return parts.joined(separator: " · ")
         }
     }
 
