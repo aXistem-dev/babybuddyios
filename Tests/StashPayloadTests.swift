@@ -1,8 +1,9 @@
 import XCTest
 @testable import BabyBuddy
 
-/// What the pumping editor sends: on a server with the milk stash, pumping is logged on a parent
-/// with no `child` key; without it, upstream's payload on the child with no stash keys.
+/// What the pumping and feeding editors send. On a server with the milk stash, pumping is logged on
+/// a parent with no `child` key, and a feeding carries its stash fields and who breastfed; without
+/// it, upstream's payloads on the child with no stash keys.
 @MainActor
 final class StashPayloadTests: XCTestCase {
     func testPumpingPayloadCapableUsesParentAndStash() {
@@ -53,6 +54,95 @@ final class StashPayloadTests: XCTestCase {
         XCTAssertEqual(EntityEditorView.defaultParentID(forChild: 1, in: [robin, casey, sam]), 1)
         XCTAssertNil(EntityEditorView.defaultParentID(forChild: 2, in: [robin, casey, sam]))
         XCTAssertNil(EntityEditorView.defaultParentID(forChild: 3, in: [robin, casey, sam]))
+    }
+
+    // MARK: Feeding
+
+    func testBottleFromStashWithDiscard() {
+        let f = EntityEditorView.feedingStashFields(type: .breastMilk, method: .bottle, fromStash: true,
+                                                    amount: 60, stashAmount: nil, discarded: 10,
+                                                    discardReason: "  Spilled  ", capable: true)
+        XCTAssertEqual(f["stash_amount"] as? Double, 60)
+        XCTAssertEqual(f["stash_discarded"] as? Double, 10)
+        XCTAssertEqual(f["stash_discard_reason"] as? String, "Spilled")
+    }
+
+    func testDiscardOffSendsNull() {
+        let f = EntityEditorView.feedingStashFields(type: .breastMilk, method: .bottle, fromStash: true,
+                                                    amount: 60, stashAmount: 60, discarded: nil,
+                                                    discardReason: "Spilled", capable: true)
+        XCTAssertTrue(f["stash_discarded"] is NSNull)
+        XCTAssertEqual(f["stash_discard_reason"] as? String, "")
+    }
+
+    func testFormulaClearsStashFields() {
+        let f = EntityEditorView.feedingStashFields(type: .formula, method: .bottle, fromStash: true,
+                                                    amount: 60, stashAmount: 60, discarded: 10,
+                                                    discardReason: "x", capable: true)
+        XCTAssertTrue(f["stash_amount"] is NSNull)
+        XCTAssertTrue(f["stash_discarded"] is NSNull)
+        XCTAssertEqual(f["stash_discard_reason"] as? String, "")
+    }
+
+    func testNotCapableSendsNothing() {
+        XCTAssertTrue(EntityEditorView.feedingStashFields(type: .breastMilk, method: .bottle, fromStash: true,
+                                                          amount: 60, stashAmount: nil, discarded: 5,
+                                                          discardReason: nil, capable: false).isEmpty)
+    }
+
+    func testDiscardReasonCappedAt255() {
+        let f = EntityEditorView.feedingStashFields(type: .breastMilk, method: .bottle, fromStash: true,
+                                                    amount: 60, stashAmount: nil, discarded: 5,
+                                                    discardReason: String(repeating: "a", count: 300), capable: true)
+        XCTAssertEqual((f["stash_discard_reason"] as? String)?.count, 255)
+    }
+
+    /// Only part of the bottle came from the stash: that part is sent, not the whole.
+    func testBottleSendsAmountFromStash() {
+        let f = EntityEditorView.feedingStashFields(type: .fortifiedBreastMilk, method: .bottle, fromStash: true,
+                                                    amount: 90, stashAmount: 50, discarded: nil,
+                                                    discardReason: nil, capable: true)
+        XCTAssertEqual(f["stash_amount"] as? Double, 50)
+    }
+
+    /// A bottle not taken from the stash clears it, and never sends a discard without a stash amount,
+    /// which the server refuses.
+    func testNotFromStashClearsDiscard() {
+        let f = EntityEditorView.feedingStashFields(type: .breastMilk, method: .bottle, fromStash: false,
+                                                    amount: 60, stashAmount: 60, discarded: 10,
+                                                    discardReason: "Spilled", capable: true)
+        XCTAssertTrue(f["stash_amount"] is NSNull)
+        XCTAssertTrue(f["stash_discarded"] is NSNull)
+        XCTAssertEqual(f["stash_discard_reason"] as? String, "")
+    }
+
+    /// A breastfeed is never taken from the stash.
+    func testBreastfeedClearsStashFields() {
+        let f = EntityEditorView.feedingStashFields(type: .breastMilk, method: .leftBreast, fromStash: true,
+                                                    amount: nil, stashAmount: nil, discarded: nil,
+                                                    discardReason: nil, capable: true)
+        XCTAssertTrue(f["stash_amount"] is NSNull)
+        XCTAssertTrue(f["stash_discarded"] is NSNull)
+        XCTAssertEqual(f["stash_discard_reason"] as? String, "")
+    }
+
+    func testBreastfeedParentRules() {
+        XCTAssertEqual(EntityEditorView.feedingParentField(method: .leftBreast, parentID: 7, linkedParentCount: 1,
+                                                           isNew: true, capable: true)["parent"] as? Int, 7)
+        XCTAssertTrue(EntityEditorView.feedingParentField(method: .leftBreast, parentID: nil, linkedParentCount: 2,
+                                                          isNew: true, capable: true).isEmpty)
+        XCTAssertTrue(EntityEditorView.feedingParentField(method: .bothBreasts, parentID: nil, linkedParentCount: 2,
+                                                          isNew: false, capable: true)["parent"] is NSNull)
+        XCTAssertTrue(EntityEditorView.feedingParentField(method: .bottle, parentID: 7, linkedParentCount: 1,
+                                                          isNew: true, capable: true).isEmpty)
+        XCTAssertTrue(EntityEditorView.feedingParentField(method: .leftBreast, parentID: 7, linkedParentCount: 1,
+                                                          isNew: true, capable: false).isEmpty)
+    }
+
+    /// Editing a breastfeed of a child with one parent, and no parent chosen: nothing is sent.
+    func testBreastfeedEditWithOneParentSendsNothing() {
+        XCTAssertTrue(EntityEditorView.feedingParentField(method: .rightBreast, parentID: nil, linkedParentCount: 1,
+                                                          isNew: false, capable: true).isEmpty)
     }
 
     private func parent(_ id: Int, _ name: String, children: [Int]) -> LocalEntity {
