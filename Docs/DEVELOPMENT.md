@@ -80,6 +80,7 @@ Pass these via `SIMCTL_CHILD_<NAME>` environment variables to `xcrun simctl laun
 | `BB_NUDGE=gentle\|milestone\|banner` | Force a support-nudge surface on the Dashboard |
 | `BB_TIMER_ALERT_SECONDS=<n>` | Turn forgotten-timer alerts on and fire them `n` seconds after a timer starts, whatever Settings says |
 | `BB_DOSE_ALERT_SECONDS=<n>` | Turn medication reminders on and shorten every next-dose interval to `n` seconds (the editor's shortest is 4 h) |
+| `BB_STASH_ALERT_SECONDS=<n>` | Turn milk age alerts on and fire each stash lot's "use it first" `n` seconds after launch, its "throw it away" `3n` (on a server with the milk stash, or `BB_DEMO`) |
 | `BB_TOAST_SECONDS=<n>` | Hold the undo toast open for `n` seconds instead of 5 |
 
 `BB_DEMO=1` is the fastest way to see the app without standing up a server — it seeds a child,

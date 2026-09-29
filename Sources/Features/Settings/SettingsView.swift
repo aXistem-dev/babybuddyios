@@ -42,6 +42,9 @@ struct SettingsView: View {
     @AppStorage(ForgottenTimerPolicy.enabledKey, store: SharedDefaults.suite) private var timerAlertsEnabled = false
     // Mirrors MedicationReminderPolicy.isEnabled.
     @AppStorage(MedicationReminderPolicy.enabledKey, store: SharedDefaults.suite) private var doseRemindersEnabled = false
+    // Mirrors StashAgePolicy.isEnabled, on by default.
+    @AppStorage(StashAgePolicy.enabledKey, store: SharedDefaults.suite)
+    private var stashAlertsEnabled = StashAgePolicy.defaultOn
     @AppStorage(UndoToastCenter.enabledKey) private var undoToastEnabled = true
     /// The stash screen's below-zero warning, dismissed there and turned back on here.
     @AppStorage(StashNegativeWarning.dismissedKey, store: SharedDefaults.suite)
@@ -572,6 +575,22 @@ struct SettingsView: View {
             SettingsRow(symbol: "pills.fill", tint: BBColor.activity(.medication), title: "Medication reminders") {
                 Self.alertToggle("Medication reminders", $doseRemindersEnabled, setting: "medicationReminders")
             }
+
+            if StashCapability.isSupported {
+                rowDivider
+
+                SettingsRow(symbol: "clock.badge.exclamationmark", tint: BBColor.pumping, title: "Milk age alerts",
+                            subtitle: Self.stashAlertsSubtitle(StashCapability.summary)) {
+                    Self.alertToggle("Milk age alerts", $stashAlertsEnabled, setting: "stashAgeAlerts")
+                }
+            }
+        }
+    }
+
+    /// The server's milk age limits, which the alerts follow; none until a summary has synced.
+    static func stashAlertsSubtitle(_ summary: StashSummaryDTO?) -> String? {
+        summary.map {
+            "Use first after \(Int($0.warn_age_hours)) h, throw away after \(Int($0.max_age_hours)) h (set on the server)"
         }
     }
 

@@ -55,7 +55,17 @@ enum StashKind: String, Codable, CaseIterable, Identifiable {
 }
 
 /// How old a stash lot (or the stash as a whole, by its oldest lot) is.
-enum StashStatus: String, Codable { case ok, warn, expired }
+enum StashStatus: String, Codable {
+    case ok, warn, expired
+
+    var label: String {
+        switch self {
+        case .ok: return "Fresh"
+        case .warn: return "Use first"
+        case .expired: return "Expired"
+        }
+    }
+}
 
 // MARK: - Resources
 //

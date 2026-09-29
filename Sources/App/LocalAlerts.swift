@@ -173,6 +173,89 @@ enum MedicationReminderPolicy {
     }
 }
 
+/// Milk age alerts from the server's stash summary: for each lot still in the stash, "use it first"
+/// once it reaches the server's warn age and "throw it away" once it passes the maximum age. The
+/// summary is the server's (the app can't run FIFO over the whole history), so the alerts follow the
+/// last one cached. On by default on a server with the milk stash (Settings › Notifications).
+enum StashAgePolicy {
+    static let enabledKey = "stashAgeAlertsEnabled"
+    /// Ids of stash alerts already handed to the notification center once (see ``firstTimeOnly``).
+    static let scheduledKey = "stashAgeAlertsScheduled"
+
+    /// On unless switched off. UI tests (`BB_UITEST=1`, DEBUG) start with it off: the demo stash
+    /// always holds old milk, so on by default it would raise the permission prompt and fire two
+    /// banners over every other test. `BB_STASH_ALERT_SECONDS` turns it on for the tests about it.
+    static var defaultOn: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["BB_UITEST"] == "1" { return false }
+        #endif
+        return true
+    }
+
+    static var isEnabled: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["BB_STASH_ALERT_SECONDS"] != nil { return true }
+        #endif
+        return SharedDefaults.suite.object(forKey: enabledKey) as? Bool ?? defaultOn
+    }
+
+    #if DEBUG
+    /// When `BB_STASH_ALERT_SECONDS` counts from: the first time the alerts are worked out in this
+    /// launch, to the second, so every reconcile asks for the same fire dates.
+    private static let hookStart = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
+    #endif
+
+    /// The alerts `summary`'s lots want: `stash-warn-<lotEpoch>` at the lot's `warn_at` and
+    /// `stash-expire-<lotEpoch>` at its `expires_at`, both opening the stash screen. `lotEpoch` is
+    /// the lot's time in whole seconds, stable for as long as the lot lasts, so a lot that is used
+    /// up drops its alerts. A lot that has already expired only needs throwing away, so it gets no
+    /// "use it first".
+    ///
+    /// `BB_STASH_ALERT_SECONDS=<n>` (DEBUG) brings every "use it first" to n seconds after the
+    /// first reconcile of the launch and every "throw it away" to 3n, the counterpart of
+    /// `BB_TIMER_ALERT_SECONDS`: no test can wait 48 hours.
+    static func requests(from summary: StashSummaryDTO?, now: Date) -> [ForgottenTimerPolicy.Request] {
+        guard let summary else { return [] }
+        let warnHours = Int(summary.warn_age_hours), maxHours = Int(summary.max_age_hours)
+        return summary.lots.flatMap { lot -> [ForgottenTimerPolicy.Request] in
+            let epoch = Int(lot.time.timeIntervalSince1970)
+            let milk = "\(EntityFormatting.formatAmount(lot.amount)) pumped "
+                + lot.time.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+            let fire = fireDates(lot)
+            let expire = ForgottenTimerPolicy.Request(
+                id: "stash-expire-\(epoch)", fireDate: fire.expire,
+                title: "Throw this milk away",
+                body: "\(milk) is past \(maxHours) h.",
+                url: "babybuddy://stash")
+            guard lot.expires_at > now else { return [expire] }
+            let warn = ForgottenTimerPolicy.Request(
+                id: "stash-warn-\(epoch)", fireDate: fire.warn,
+                title: "Milk is getting old",
+                body: "\(milk) is \(warnHours) h old: use it first.",
+                url: "babybuddy://stash")
+            return [warn, expire]
+        }
+    }
+
+    /// A lot's own warn and expiry times, or the `BB_STASH_ALERT_SECONDS` ones.
+    private static func fireDates(_ lot: StashLotDTO) -> (warn: Date, expire: Date) {
+        #if DEBUG
+        if let seconds = ProcessInfo.processInfo.environment["BB_STASH_ALERT_SECONDS"], let n = Double(seconds) {
+            return (hookStart.addingTimeInterval(n), hookStart.addingTimeInterval(3 * n))
+        }
+        #endif
+        return (lot.warn_at, lot.expires_at)
+    }
+
+    /// `add` without the overdue alerts that were already scheduled once. The notification center
+    /// forgets a delivered alert once it's cleared from Notification Center, and an overdue alert
+    /// fires straight away, so without this every foreground would fire a cleared one again.
+    static func firstTimeOnly(_ add: [ForgottenTimerPolicy.Request], scheduled: Set<String>,
+                              now: Date) -> [ForgottenTimerPolicy.Request] {
+        add.filter { $0.fireDate > now || !scheduled.contains($0.id) }
+    }
+}
+
 /// While a child is in sick mode and their newest reading is over the fever line, one reminder to
 /// take the next reading, the check cadence after it. A newer reading replaces it.
 enum TemperatureCheckPolicy {
@@ -192,7 +275,8 @@ enum TemperatureCheckPolicy {
 }
 
 /// Keeps the app's local notifications in step with the shared store: forgotten-timer alerts,
-/// medication next-dose reminders and sick mode's temperature checks. Mirrors
+/// medication next-dose reminders, sick mode's temperature checks and the milk age alerts from the
+/// cached stash summary. Mirrors
 /// ``LiveActivityManager``: one idempotent ``reconcile()`` that ``LiveActivityManager/reconcile()``
 /// calls, so every timer start/stop/discard, editor save/delete and app foreground already covers
 /// it; ``SyncEngine`` adds a pull that brought changes (a dose logged on the web).
@@ -204,11 +288,15 @@ final class LocalAlerts {
     func reconcile() async {
         let timersOn = ForgottenTimerPolicy.isEnabled, dosesOn = MedicationReminderPolicy.isEnabled
         let checksOn = SickMode.checkHours > 0 && !SickModeStore.shared.active.isEmpty
+        let stashOn = StashCapability.isSupported && StashAgePolicy.isEnabled
+        let now = Date()
         let wanted = timersOn || dosesOn || checksOn ? wantedRequests() : (timers: [], doses: [], checks: [])
+        let stash = stashOn ? StashAgePolicy.requests(from: StashCapability.summary, now: now) : []
         // The setting can arrive on before permission was ever asked (a restored App Group
-        // default); ask now rather than schedule alerts that can never show. Temperature checks are
-        // on by default, so they ask the first time one is due: sick mode on, with a fever.
-        if timersOn || dosesOn || !wanted.checks.isEmpty,
+        // default); ask now rather than schedule alerts that can never show. Temperature checks and
+        // milk age alerts are on by default, so they ask the first time one is wanted: sick mode on
+        // with a fever, or milk in the stash.
+        if timersOn || dosesOn || !wanted.checks.isEmpty || !stash.isEmpty,
            await center.notificationSettings().authorizationStatus == .notDetermined {
             _ = await requestAuthorization()
         }
@@ -221,19 +309,30 @@ final class LocalAlerts {
         let delivered = Set(await center.deliveredNotifications().map(\.request.identifier))
 
         // A dose reminder or temperature check that is already overdue when first seen (an old
-        // dose, or the app opened long after) says nothing useful, so only timers fire late.
+        // dose, or the app opened long after) says nothing useful, so only timers fire late — and
+        // milk age alerts: milk past its age still has to be used first or thrown away.
+        let stashScheduled = Set(SharedDefaults.suite.stringArray(forKey: StashAgePolicy.scheduledKey) ?? [])
         for (prefix, requests, firesOverdue) in [("timer-", timersOn ? wanted.timers : [], true),
                                                  ("medication-", dosesOn ? wanted.doses : [], false),
-                                                 ("temperature-", wanted.checks, false)] {
+                                                 ("temperature-", wanted.checks, false),
+                                                 ("stash-", stash, true)] {
             let plan = ForgottenTimerPolicy.plan(wanted: requests, pending: pending, delivered: delivered,
-                                                 prefix: prefix, firesOverdue: firesOverdue)
+                                                 now: now, prefix: prefix, firesOverdue: firesOverdue)
             center.removePendingNotificationRequests(withIdentifiers: plan.remove)
             // A stopped timer's or superseded dose's delivered banner is stale too; a live one stays.
+            // So is a used-up lot's, or its "use it first" once it has expired.
             let wantedIDs = Set(requests.map(\.id))
             center.removeDeliveredNotifications(withIdentifiers: delivered.filter {
                 $0.hasPrefix(prefix) && !wantedIDs.contains($0)
             })
-            for request in plan.add {
+            var add = plan.add
+            if prefix == "stash-" {
+                add = StashAgePolicy.firstTimeOnly(add, scheduled: stashScheduled, now: now)
+                // Remembered while the lot still wants it, so the list never outgrows the stash.
+                let scheduled = stashScheduled.intersection(wantedIDs).union(add.map(\.id))
+                SharedDefaults.suite.set(scheduled.sorted(), forKey: StashAgePolicy.scheduledKey)
+            }
+            for request in add {
                 let content = UNMutableNotificationContent()
                 content.title = request.title
                 content.body = request.body

@@ -371,14 +371,6 @@ struct StashStatusChip: View {
 }
 
 extension StashStatus {
-    var label: String {
-        switch self {
-        case .ok: return "Fresh"
-        case .warn: return "Use first"
-        case .expired: return "Expired"
-        }
-    }
-
     fileprivate var fill: Color {
         switch self {
         case .ok: return BBColor.success
