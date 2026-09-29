@@ -85,9 +85,17 @@ struct EntityEditorView: View {
     @State private var doseInterval: DoseInterval = .none
     @State private var customDoseHours = ""
     @State private var customDoseMinutes = ""
+    // Pumping, on a server with the milk stash: who pumped, and how much went into the stash.
+    @State private var parentID: Int?
+    @State private var toStash = true
+    /// Millilitres put into the stash; follows the amount until edited under "More".
+    @State private var storedAmount = ""
+    @State private var showsStashDetails = false
 
     /// Every cached dose, so a dose synced in while the editor is open still raises the warning.
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" }) private var medications: [LocalEntity]
+    /// The cached parents, for "Who pumped" on a server with the milk stash.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "parent" }) private var parents: [LocalEntity]
 
     @State private var confirmingDelete = false
     /// The queued write for this record that the server refused, if any. Drives the sync banner.
@@ -378,8 +386,7 @@ struct EntityEditorView: View {
             BBCard(cornerRadius: BBRadius.tile) {
                 TextField("Milestone", text: $milestone, axis: .vertical).lineLimit(1...3)
             }
-        case .pumping:
-            BBCard(cornerRadius: BBRadius.tile) { fieldLabeled("Amount") { amountStepper } }
+        case .pumping: pumpingDetails
         case .note:
             BBCard(cornerRadius: BBRadius.tile) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -419,6 +426,59 @@ struct EntityEditorView: View {
                 }
                 fieldLabeled("Amount") { amountStepper }
             }
+        }
+    }
+
+    /// Upstream's amount alone, unless the server has the milk stash: then the pumping is logged on
+    /// a parent, with a switch for whether it went into the stash and, under "More", how much of it.
+    private var pumpingDetails: some View {
+        let capable = StashCapability.isSupported
+        return BBCard(cornerRadius: BBRadius.tile) {
+            VStack(alignment: .leading, spacing: 16) {
+                if capable, !parentChoices.isEmpty {
+                    fieldLabeled("Who pumped") { parentPicker }
+                }
+                fieldLabeled("Amount") { amountStepper }
+                if capable {
+                    Toggle(isOn: $toStash) { Text("Store in stash").font(.body) }
+                        .tint(BBColor.primary)
+                    if toStash {
+                        DisclosureGroup("More", isExpanded: $showsStashDetails) {
+                            fieldLabeled("Amount stored") { amountField($storedAmount) }
+                                .padding(.top, 8)
+                                .onAppear { if storedAmount.isEmpty { storedAmount = amount } }
+                        }
+                        .tint(BBColor.brandAccent)
+                    }
+                }
+            }
+        }
+        // The stored amount tracks the amount until it's changed on its own.
+        .onChange(of: amount) { old, new in
+            if storedAmount == old { storedAmount = new }
+        }
+    }
+
+    /// The cached parents by first name, for "Who pumped".
+    private var parentChoices: [(id: Int, name: String)] {
+        parents.compactMap { entity -> (id: Int, name: String)? in
+            guard entity.syncState != .pendingDelete,
+                  let id = (entity.payloadObject["id"] as? Int) ?? entity.serverID else { return nil }
+            return (id: id, name: entity.payloadObject["first_name"] as? String ?? "")
+        }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// A segment per parent, or a menu when there are too many to fit. Nothing is selected when
+    /// the child has several parents and the entry isn't one of theirs yet.
+    @ViewBuilder private var parentPicker: some View {
+        let choices = parentChoices
+        let options = choices.map { Optional($0.id) }
+        let name: (Int?) -> String = { id in choices.first { $0.id == id }?.name ?? "Choose" }
+        if choices.count <= 3 {
+            BBSegmentedControl(selection: $parentID, options: options, label: name)
+        } else {
+            menuField(options: options, selection: $parentID, label: name)
         }
     }
 
@@ -585,11 +645,13 @@ struct EntityEditorView: View {
         }
     }
 
+    private var amountStepper: some View { amountField($amount) }
+
     /// Amount = grouped large value + "ml", with a neutral "−" and a brand-blue "+".
-    private var amountStepper: some View {
+    private func amountField(_ text: Binding<String>) -> some View {
         HStack(spacing: 10) {
             HStack(spacing: 6) {
-                TextField("0", text: $amount)
+                TextField("0", text: text)
                     .keyboardType(.decimalPad)
                     .font(.title3.weight(.semibold)).monospacedDigit()
                     .fixedSize()
@@ -604,8 +666,8 @@ struct EntityEditorView: View {
                     .strokeBorder(BBColor.fieldStroke, lineWidth: 0.5)
             }
 
-            stepperButton(system: "minus", tint: false) { adjustAmount(-5) }
-            stepperButton(system: "plus", tint: true) { adjustAmount(5) }
+            stepperButton(system: "minus", tint: false) { adjust(text, by: -5) }
+            stepperButton(system: "plus", tint: true) { adjust(text, by: 5) }
         }
     }
 
@@ -620,9 +682,9 @@ struct EntityEditorView: View {
         .buttonStyle(.plain)
     }
 
-    private func adjustAmount(_ delta: Double) {
-        let next = max(0, (ActivityDraft.number(amount) ?? 0) + delta)
-        amount = trimmed(next)
+    private func adjust(_ text: Binding<String>, by delta: Double) {
+        let next = max(0, (ActivityDraft.number(text.wrappedValue) ?? 0) + delta)
+        text.wrappedValue = trimmed(next)
     }
 
     // MARK: Tags & notes cards
@@ -692,7 +754,8 @@ struct EntityEditorView: View {
     private var draft: ActivityDraft {
         ActivityDraft(kind: kind, start: start, end: end, time: time, date: date,
                       amount: amount, value: value, dosage: dosage,
-                      noteText: noteText, medName: medName)
+                      noteText: noteText, medName: medName,
+                      parentID: parentID, requiresParent: StashCapability.isSupported)
     }
 
     private var problem: ActivityProblem? { draft.problem }
@@ -818,6 +881,10 @@ struct EntityEditorView: View {
     // MARK: Load / save
 
     private func populate() {
+        // A new pumping on a server with the milk stash starts on the child's parent, going into
+        // the stash as the server's default says. An edit loads its own below.
+        parentID = Self.defaultParentID(forChild: childID, in: parents)
+        toStash = StashCapability.summary?.defaults.pumping_to_stash ?? true
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
             if let s = timer.payloadObject["start"] as? String, let d = APIDate.parse(s) { start = d }
@@ -839,6 +906,12 @@ struct EntityEditorView: View {
         if let t = p["type"] as? String, let ft = FeedingType(rawValue: t) { feedingType = ft }
         if let m = p["method"] as? String, let fm = FeedingMethod(rawValue: m) { feedingMethod = fm }
         if let a = p["amount"] as? Double { amount = trimmed(a) }
+        if entity != nil, kind == .pumping {
+            if let parent = p["parent"] as? Int { parentID = parent }
+            let stashed = p["stash_amount"] as? Double
+            toStash = stashed != nil
+            if let stashed { storedAmount = trimmed(stashed) }
+        }
         wet = p["wet"] as? Bool ?? wet
         solid = p["solid"] as? Bool ?? solid
         if let c = p["color"] as? String { color = DiaperColor(rawValue: c) }
@@ -940,6 +1013,9 @@ struct EntityEditorView: View {
             p["start"] = iso(start); p["end"] = iso(end)
             if let a = ActivityDraft.number(amount) { p["amount"] = a }
             p["notes"] = notes; p["tags"] = tagList
+            p = Self.pumpingPayload(base: p, parentID: parentID, toStash: toStash,
+                                    storedAmount: ActivityDraft.number(storedAmount),
+                                    amount: ActivityDraft.number(amount), capable: StashCapability.isSupported)
         case .note:
             p["time"] = iso(time); p["note"] = noteText; p["tags"] = tagList
         case .weight, .height, .headCircumference, .bmi:
@@ -963,6 +1039,29 @@ struct EntityEditorView: View {
         // Preserve the server id when editing so the payload round-trips.
         if let id = entity?.serverID { p["id"] = id }
         return p
+    }
+
+    /// A pumping's payload. On a server with the milk stash (`capable`) it's logged on a parent:
+    /// `parent`, and no `child` (the server keeps pumping on a parent at `child: null`), with
+    /// `stash_amount` the stored amount, else the whole amount, or null when it was kept out of the
+    /// stash. Otherwise `base` unchanged: upstream's payload, on the child, with no stash keys.
+    /// Creating, editing and converting a timer all go through this.
+    static func pumpingPayload(base: [String: Any], parentID: Int?, toStash: Bool, storedAmount: Double?,
+                               amount: Double?, capable: Bool) -> [String: Any] {
+        guard capable else { return base }
+        var p = base
+        p.removeValue(forKey: "child")
+        if let parentID { p["parent"] = parentID }
+        let stashed = toStash ? (storedAmount ?? amount) : nil
+        p["stash_amount"] = stashed.map { $0 as Any } ?? NSNull()
+        return p
+    }
+
+    /// The parent a new pumping starts on: the only one linked to `child`. With none or several
+    /// it's nil, so the picker starts empty and Save waits for a choice.
+    static func defaultParentID(forChild child: Int, in entities: [LocalEntity]) -> Int? {
+        let linked = EntityVisibility.parentIDs(forChild: child, in: entities)
+        return linked.count == 1 ? linked.first : nil
     }
 
     /// The chosen next-dose interval in seconds; a blank or zero custom entry means none.

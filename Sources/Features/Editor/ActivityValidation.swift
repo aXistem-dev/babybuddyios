@@ -9,6 +9,7 @@ enum ActivityProblem: Equatable {
     case notANumber
     case noteRequired
     case medicationNameRequired
+    case parentRequired
     case startAfterEnd
     case over24Hours
     case futureTimestamp
@@ -22,6 +23,7 @@ enum ActivityProblem: Equatable {
         case .notANumber:            return "That isn't a number Baby Buddy can read. Use digits, like 90 or 4.5."
         case .noteRequired:          return "Write something for this note."
         case .medicationNameRequired: return "Enter the medication name."
+        case .parentRequired:        return "Choose who pumped."
         case .startAfterEnd:         return "The start time is after the end time."
         case .over24Hours:           return "Baby Buddy won't accept more than 24 hours between start and end."
         case .futureTimestamp:       return "That time is in the future — Baby Buddy only accepts times up to now."
@@ -51,6 +53,10 @@ struct ActivityDraft {
     var dosage = ""
     var noteText = ""
     var medName = ""
+    /// Who pumped. On a server with the milk stash (`requiresParent`) pumping is logged on a
+    /// parent, so it needs one.
+    var parentID: Int?
+    var requiresParent = false
     /// Injected so the future-timestamp rules are testable against a fixed clock.
     var now = Date()
 
@@ -63,7 +69,7 @@ struct ActivityDraft {
             // silently — if something was typed it has to be a number.
             return amountProblem(required: false) ?? durationProblem(futureEnd: false)
         case .pumping:
-            return amountProblem(required: true) ?? durationProblem(futureEnd: false)
+            return amountProblem(required: true) ?? parentProblem ?? durationProblem(futureEnd: false)
         case .sleep, .tummyTime:
             return durationProblem(futureEnd: true)
         case .change:
@@ -89,6 +95,10 @@ struct ActivityDraft {
         if amount.trimmingCharacters(in: .whitespaces).isEmpty { return required ? .amountRequired : nil }
         guard let parsed = Self.number(amount), parsed >= 0 else { return .notANumber }
         return nil
+    }
+
+    private var parentProblem: ActivityProblem? {
+        requiresParent && parentID == nil ? .parentRequired : nil
     }
 
     private var valueProblem: ActivityProblem? {
