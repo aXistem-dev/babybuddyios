@@ -26,10 +26,10 @@ final class ChartAggregationTests: XCTestCase {
 
     @discardableResult
     private func add(_ kind: EntityKind, _ payload: [String: Any],
-                     child: Int = 1, deleted: Bool = false) -> LocalEntity {
+                     child: Int? = 1, deleted: Bool = false) -> LocalEntity {
         var p = payload
         p["id"] = nextID; nextID += 1
-        p["child"] = child
+        p["child"] = child.map { $0 as Any } ?? NSNull()
         let data = try! JSONSerialization.data(withJSONObject: p)
         let entity = LocalStore.upsertFromServer(data, kind: kind, in: context)!
         if deleted { entity.syncState = .pendingDelete }
@@ -134,6 +134,35 @@ final class ChartAggregationTests: XCTestCase {
         XCTAssertEqual(today?.count, 2)
         XCTAssertEqual(today?.totalAmount ?? -1, 210.5, accuracy: 0.001)
         XCTAssertEqual(series.reduce(0) { $0 + $1.count }, 2)
+    }
+
+    /// On a server with the milk stash pumping belongs to a parent: the per-parent series sums the
+    /// sessions whose `parent` is that parent, with or without a child, and nobody else's.
+    func testPumpingByParent() {
+        add(.pumping, ["start": "2026-06-15T08:00:00Z", "end": "2026-06-15T08:20:00Z", "amount": 120,
+                       "parent": 7], child: nil)
+        add(.pumping, ["start": "2026-06-14T08:00:00Z", "end": "2026-06-14T08:20:00Z", "amount": 60.5,
+                       "parent": 7]) // a legacy session that still carries its child
+        add(.pumping, ["start": "2026-06-15T09:00:00Z", "end": "2026-06-15T09:20:00Z", "amount": 200,
+                       "parent": 8], child: nil) // another parent
+        add(.pumping, ["start": "2026-06-15T10:00:00Z", "end": "2026-06-15T10:20:00Z", "amount": 90])
+        add(.pumping, ["start": "2026-06-15T11:00:00Z", "end": "2026-06-15T11:20:00Z", "amount": 50,
+                       "parent": 7], child: nil, deleted: true)
+        add(.feeding, ["start": "2026-06-15T12:00:00Z", "end": "2026-06-15T12:10:00Z", "amount": 100,
+                       "parent": 7])
+
+        let series = aggregator.pumpingByDay(all(), parentID: 7, period: .week, now: now)
+        XCTAssertEqual(series.count, 7)
+        XCTAssertEqual(bucket(series, "2026-06-15T00:00:00Z")?.count, 1)
+        XCTAssertEqual(bucket(series, "2026-06-15T00:00:00Z")?.totalAmount ?? -1, 120, accuracy: 0.001)
+        XCTAssertEqual(bucket(series, "2026-06-14T00:00:00Z")?.totalAmount ?? -1, 60.5, accuracy: 0.001)
+        XCTAssertEqual(series.reduce(0) { $0 + $1.count }, 2)
+
+        let other = aggregator.pumpingByDay(all(), parentID: 8, period: .week, now: now)
+        XCTAssertEqual(other.reduce(0) { $0 + $1.totalAmount }, 200, accuracy: 0.001)
+        // The child-based series is unchanged: only the sessions on child 1.
+        let child = aggregator.pumpingByDay(all(), childID: 1, period: .week, now: now)
+        XCTAssertEqual(child.reduce(0) { $0 + $1.count }, 2)
     }
 
     // MARK: Scoping & empty
