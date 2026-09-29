@@ -211,6 +211,22 @@ final class StashTests: UITestCase {
         expect(app.navigationBars["Milk stash"])
     }
 
+    // MARK: Trends
+
+    /// With the milk stash, pumping is a parent's: Trends has no pumping card (the stash screen
+    /// charts it per parent). Without it, Trends is upstream's.
+    func testTrendsHidePumpingWithStash() {
+        launch(["BB_START_TAB": "trends"])
+        expect(app.staticTexts["Tummy Time"])
+        XCTAssertFalse(app.staticTexts["Pumping"].exists)
+    }
+
+    func testTrendsKeepPumpingWithoutStash() {
+        launch(["BB_START_TAB": "trends", "BB_NO_STASH": "1"])
+        expect(app.staticTexts["Tummy Time"])
+        expect(app.staticTexts["Pumping"])
+    }
+
     /// Without the milk stash a breast-milk bottle is upstream's: no stash switch.
     func testFeedingEditorWithoutStash() {
         launch(["BB_NO_STASH": "1"])

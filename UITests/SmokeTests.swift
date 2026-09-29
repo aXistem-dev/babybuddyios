@@ -16,7 +16,8 @@ final class SmokeTests: UITestCase {
         expect(element(labeled: "Feeding, "))
 
         tap(app.tabBars.buttons["Trends"])
-        for card in ["Sleep", "Feedings", "Diapers", "Tummy Time", "Pumping"] {
+        // No pumping card: the demo server has the milk stash, where pumping is a parent's.
+        for card in ["Sleep", "Feedings", "Diapers", "Tummy Time"] {
             expect(app.staticTexts[card])
         }
 
@@ -120,7 +121,7 @@ final class SmokeTests: UITestCase {
             let segment = app.buttons[period]
             tap(segment)
             XCTAssertTrue(segment.isSelected, "\(period) should read as selected")
-            for card in ["Sleep", "Feedings", "Diapers", "Tummy Time", "Pumping", "Temperature"] {
+            for card in ["Sleep", "Feedings", "Diapers", "Tummy Time", "Temperature"] {
                 XCTAssertTrue(app.staticTexts[card].exists, "\(card) card missing at \(period)")
             }
         }

@@ -56,7 +56,9 @@ struct InsightsView: View {
                     feedingCard
                     diaperCard
                     tummyTimeCard
-                    pumpingCard
+                    // With the milk stash, pumping is a parent's, not the child's: its chart is on
+                    // the stash screen, per parent.
+                    if !StashCapability.isSupported { pumpingCard }
                     temperatureCard
                 }
                 .padding(.horizontal)

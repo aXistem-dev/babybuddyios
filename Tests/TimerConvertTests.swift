@@ -173,6 +173,47 @@ final class TimerConvertTests: XCTestCase {
         XCTAssertEqual(try mutations().map(\.op), [.delete])
     }
 
+    // MARK: Pumping on a server with the milk stash
+
+    /// A pumping timer runs on a child, but on a server with the milk stash the session it logs is
+    /// the parent's: the convert editor's payload carries `parent` and no `child`, and so does the
+    /// queued create.
+    func testConvertPumpingTimerWhenCapableLogsOnParent() throws {
+        let timer = try syncedTimer(id: 9)
+        var base = timer.stoppedTimerPayload()
+        base["amount"] = 120.0
+        XCTAssertEqual(base["child"] as? Int, 1, "the timer's child is where the editor starts")
+        let payload = EntityEditorView.pumpingPayload(base: base, parentID: 7, toStash: true,
+                                                      storedAmount: nil, amount: 120, capable: true)
+
+        let activity = repo.convertTimer(timer, to: .pumping, payload: payload)
+
+        XCTAssertEqual(activity?.kind, .pumping)
+        XCTAssertNil(activity?.payloadObject["child"])
+        XCTAssertEqual(activity?.payloadObject["parent"] as? Int, 7)
+        XCTAssertEqual(activity?.payloadObject["stash_amount"] as? Double, 120)
+        XCTAssertNil(activity?.childID)
+        let create = try XCTUnwrap(try mutations().first { $0.op == .create })
+        let body = try JSONSerialization.jsonObject(with: create.payload) as? [String: Any]
+        XCTAssertNil(body?["child"])
+        XCTAssertEqual(body?["parent"] as? Int, 7)
+    }
+
+    /// Without the milk stash the same convert is upstream's: on the child, no stash keys.
+    func testConvertPumpingTimerWithoutCapabilityKeepsChild() throws {
+        let timer = try syncedTimer(id: 9)
+        var base = timer.stoppedTimerPayload()
+        base["amount"] = 120.0
+        let payload = EntityEditorView.pumpingPayload(base: base, parentID: nil, toStash: true,
+                                                      storedAmount: nil, amount: 120, capable: false)
+
+        let activity = repo.convertTimer(timer, to: .pumping, payload: payload)
+
+        XCTAssertEqual(activity?.payloadObject["child"] as? Int, 1)
+        XCTAssertNil(activity?.payloadObject["parent"])
+        XCTAssertNil(activity?.payloadObject["stash_amount"])
+    }
+
     func testConvertInheritsTimerStart() throws {
         // The convert flow pre-fills start from the timer; verify the payload we hand the
         // repository round-trips the timer's start onto the activity.
