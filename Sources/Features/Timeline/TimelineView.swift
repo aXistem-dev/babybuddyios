@@ -11,7 +11,9 @@ struct TimelineView: View {
     @Binding var selectedChildID: Int
 
     /// The selected child's timeline events, filtered store-side (child, kind, delete state) so
-    /// the view never materializes the whole table. Rebuilt on child switch via `init`.
+    /// the view never materializes the whole table. Rebuilt on child switch via `init`. Also holds
+    /// the records with no child that may belong to this child's parents (parent pumping, stash
+    /// adjustments) and the parents themselves; ``EntityVisibility`` sorts those out in memory.
     @Query private var events: [LocalEntity]
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
@@ -34,9 +36,11 @@ struct TimelineView: View {
         _selectedChildID = selectedChildID
         let child = selectedChildID.wrappedValue
         let kinds = EntityKind.timelineKinds.map(\.rawValue)
+        let parentLevelKinds = [EntityKind.pumping, .stashAdjustment, .parent].map(\.rawValue)
         let pendingDelete = SyncState.pendingDelete.rawValue
         let predicate = #Predicate<LocalEntity> { entity in
-            entity.childID == child && kinds.contains(entity.kindRaw)
+            ((entity.childID == child && kinds.contains(entity.kindRaw))
+                || (entity.childID == nil && parentLevelKinds.contains(entity.kindRaw)))
                 && entity.syncStateRaw != pendingDelete
         }
         _events = Query(filter: predicate, sort: \LocalEntity.timestamp, order: .reverse)
@@ -226,13 +230,19 @@ struct TimelineView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
-    /// The store-side query already scoped to child/kind/delete-state; this applies the cheap
-    /// user filters (kind picker, date range) before the substring search, so the haystack is
-    /// only built for the already-narrowed set.
+    /// The store-side query already scoped to child/kind/delete-state; this keeps what the child
+    /// sees of the parent-level records (stash adjustments only on a server with the milk stash),
+    /// then applies the cheap user filters (kind picker, date range) before the substring search,
+    /// so the haystack is only built for the already-narrowed set.
     private var visibleEntities: [LocalEntity] {
         let childName = selectedChildName
+        let child = selectedChildID
+        let parentIDs = EntityVisibility.parentIDs(forChild: child, in: events)
+        let showsStash = StashCapability.isSupported
         return events.filter {
-            (kindFilter == nil || $0.kind == kindFilter)
+            guard EntityVisibility.isVisible($0, forChild: child, parentIDs: parentIDs),
+                  showsStash || $0.kind != EntityKind.stashAdjustment else { return false }
+            return (kindFilter == nil || $0.kind == kindFilter)
                 && TimelineFiltering.inDateRange($0.timestamp, from: dateFrom, to: dateTo)
                 && TimelineFiltering.matchesSearch($0, query: searchText, childName: childName)
         }

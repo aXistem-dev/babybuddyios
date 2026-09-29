@@ -14,7 +14,9 @@ struct DayTimelineView: View {
     let day: Date
 
     /// This child's events of the scoped kind on the scoped day, newest first — filtered
-    /// store-side so the view never materializes the whole table.
+    /// store-side so the view never materializes the whole table. Also holds the day's records of
+    /// that kind with no child (parent pumping, stash adjustments) and the parents, which
+    /// ``visibleEvents`` sorts out.
     @Query private var events: [LocalEntity]
     @Query private var cachedTags: [CachedTag]
     @Query(filter: #Predicate<PendingMutation> { $0.dispositionRaw != nil })
@@ -29,11 +31,13 @@ struct DayTimelineView: View {
         let dayStart = Calendar.current.startOfDay(for: day)
         let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? day
         let kindRaw = kind.rawValue
+        let parentKind = EntityKind.parent.rawValue
         let pendingDelete = SyncState.pendingDelete.rawValue
         let predicate = #Predicate<LocalEntity> { entity in
-            entity.kindRaw == kindRaw && entity.childID == childID
-                && entity.syncStateRaw != pendingDelete
-                && entity.timestamp >= dayStart && entity.timestamp < dayEnd
+            entity.syncStateRaw != pendingDelete
+                && ((entity.kindRaw == kindRaw && (entity.childID == childID || entity.childID == nil)
+                        && entity.timestamp >= dayStart && entity.timestamp < dayEnd)
+                    || (entity.kindRaw == parentKind && entity.childID == nil))
         }
         _events = Query(filter: predicate, sort: \LocalEntity.timestamp, order: .reverse)
     }
@@ -45,11 +49,23 @@ struct DayTimelineView: View {
             uniquingKeysWith: { first, _ in first })
     }
 
+    /// The fetched events this child sees (see ``EntityVisibility``); stash adjustments only on a
+    /// server with the milk stash.
+    private var visibleEvents: [LocalEntity] {
+        let parentIDs = EntityVisibility.parentIDs(forChild: childID, in: events)
+        let showsStash = StashCapability.isSupported
+        return events.filter {
+            EntityVisibility.isVisible($0, forChild: childID, parentIDs: parentIDs)
+                && (showsStash || $0.kind != EntityKind.stashAdjustment)
+        }
+    }
+
     var body: some View {
+        let rows = visibleEvents
         List {
-            ForEach(Array(events.enumerated()), id: \.element.localID) { index, entity in
+            ForEach(Array(rows.enumerated()), id: \.element.localID) { index, entity in
                 TimelineRailRow(entity: entity,
-                                connectsDown: index < events.count - 1,
+                                connectsDown: index < rows.count - 1,
                                 tagColors: tagColors,
                                 blocked: blockedMutations.contains { $0.localID == entity.localID })
                     .listRowInsets(EdgeInsets())
@@ -92,7 +108,7 @@ struct DayTimelineView: View {
             EntityEditorView(kind: kind, childID: childID)
         }
         .overlay {
-            if events.isEmpty { emptyState }
+            if rows.isEmpty { emptyState }
         }
         .overlay(alignment: .bottomTrailing) {
             FloatingAddButton(accessibilityLabelText: "Add \(kind.displayName)") {
