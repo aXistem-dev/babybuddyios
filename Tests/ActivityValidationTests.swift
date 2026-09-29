@@ -185,6 +185,20 @@ final class ActivityValidationTests: XCTestCase {
         XCTAssertNil(ActivityDraft(kind: .pumping, start: started, end: now, amount: "90", now: now).problem)
     }
 
+    /// On a server with the milk stash pumping is logged on a parent, so it needs one; without it,
+    /// no parent is asked for.
+    func testPumpingNeedsParentWhenStashCapable() {
+        let unchosen = ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: "90",
+                                     requiresParent: true, now: now)
+        XCTAssertEqual(unchosen.problem, .parentRequired)
+        XCTAssertEqual(ActivityProblem.parentRequired.message, "Choose who pumped.")
+        XCTAssertNil(ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: "90",
+                                   parentID: 7, requiresParent: true, now: now).problem)
+        XCTAssertNil(ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: "90", now: now).problem)
+        XCTAssertNil(ActivityDraft(kind: .feeding, start: hourAgo, end: now, requiresParent: true, now: now).problem,
+                     "Only pumping is logged on a parent")
+    }
+
     func testUneditableKindsAreNeverBlocked() {
         XCTAssertNil(ActivityDraft(kind: .timer, now: now).problem)
         XCTAssertNil(ActivityDraft(kind: .child, now: now).problem)
@@ -192,7 +206,7 @@ final class ActivityValidationTests: XCTestCase {
 
     func testEveryProblemHasAMessage() {
         let problems: [ActivityProblem] = [
-            .amountRequired, .valueRequired, .notANumber, .noteRequired, .medicationNameRequired,
+            .amountRequired, .valueRequired, .notANumber, .noteRequired, .medicationNameRequired, .parentRequired,
             .startAfterEnd, .over24Hours, .futureTimestamp, .futureDate,
         ]
         for problem in problems {
