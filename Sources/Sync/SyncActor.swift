@@ -79,7 +79,45 @@ actor SyncActor {
         if !pulledAnyKind, let serverError {
             return Self.fail(serverError, endpoint: "all", changed: changed)
         }
+        if await refreshStash(client: client) { changed = true }
         return PullOutcome(error: nil, changed: changed)
+    }
+
+    /// Refresh whether the server has the milk stash (its API root lists the stash routes) and, if
+    /// it does, the cached stash summary. Never fails the sync: an error keeps what was cached.
+    /// Returns whether either changed, so the pull counts as a change and what shows the stash
+    /// (the stash card, the milk age alerts) refreshes.
+    private func refreshStash(client: APIClient) async -> Bool {
+        let wasSupported = StashCapability.isSupported
+        let previous = Self.ignoringAge(StashCapability.summary)
+        do {
+            let root = try await client.getRawPath("")
+            StashCapability.update(rootJSON: root)
+            if StashCapability.isSupported {
+                let data = try await client.getRawPath("stash")
+                StashCapability.store(summary: try? APICoders.decoder.decode(StashSummaryDTO.self, from: data))
+            }
+        } catch let error as APIError {
+            Analytics.report(error, context: "pull-stash")
+        } catch {
+            Analytics.error(network: "pull-stash")
+        }
+        return StashCapability.isSupported != wasSupported
+            || Self.ignoringAge(StashCapability.summary) != previous
+    }
+
+    /// A summary with its age readings cleared. They tick with the clock on every request, while
+    /// what the stash shows and alerts on (amounts, lot times, status) changes only with the data
+    /// or when a lot crosses an age limit, so a sync that brought nothing new stays a no-op.
+    private static func ignoringAge(_ summary: StashSummaryDTO?) -> StashSummaryDTO? {
+        guard var summary else { return nil }
+        summary.oldest_age_hours = nil
+        summary.lots = summary.lots.map { lot in
+            var lot = lot
+            lot.age_hours = 0
+            return lot
+        }
+        return summary
     }
 
     /// Report a pull failure and turn it into the outcome the caller surfaces. `endpoint` is the
