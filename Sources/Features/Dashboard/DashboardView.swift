@@ -18,7 +18,9 @@ struct DashboardView: View {
 
     /// The records the Dashboard actually reads, filtered store-side: the selected child's
     /// events, every child record (for the header/switcher), and every timer (deep links can
-    /// target a timer belonging to any child). Rebuilt on child switch via `init`.
+    /// target a timer belonging to any child). Plus pumping logged on a parent and the parents,
+    /// so ``childEntities`` can show a linked parent's pumping (see ``EntityVisibility``). Rebuilt
+    /// on child switch via `init`.
     @Query private var allEntities: [LocalEntity]
     /// Navigation path for the day-timeline pushes (in-app "Today" tiles + the status widget).
     @State private var navPath: [EntityKind] = []
@@ -102,8 +104,10 @@ struct DashboardView: View {
         let child = selectedChildID.wrappedValue
         let childKind = EntityKind.child.rawValue
         let timerKind = EntityKind.timer.rawValue
+        let parentLevelKinds = [EntityKind.pumping, .parent].map(\.rawValue)
         let predicate = #Predicate<LocalEntity> { entity in
             entity.childID == child || entity.kindRaw == childKind || entity.kindRaw == timerKind
+                || (entity.childID == nil && parentLevelKinds.contains(entity.kindRaw))
         }
         _allEntities = Query(filter: predicate, sort: \LocalEntity.timestamp, order: .reverse)
     }
@@ -727,8 +731,14 @@ struct DashboardView: View {
 
     private var children: [LocalEntity] { allEntities.filter { $0.kind == .child } }
 
+    /// The selected child's records, and pumping logged on a parent linked to the child. Stash
+    /// adjustments belong on the timeline only, so the query never fetches them here.
     private var childEntities: [LocalEntity] {
-        allEntities.filter { $0.childID == selectedChildID && $0.syncState != .pendingDelete }
+        let child = selectedChildID
+        let parentIDs = EntityVisibility.parentIDs(forChild: child, in: allEntities)
+        return allEntities.filter {
+            $0.syncState != .pendingDelete && EntityVisibility.isVisible($0, forChild: child, parentIDs: parentIDs)
+        }
     }
 
     private var currentChild: LocalEntity? { children.first { $0.serverID == selectedChildID } }
