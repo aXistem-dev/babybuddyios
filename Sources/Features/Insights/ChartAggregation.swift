@@ -98,17 +98,34 @@ struct ChartAggregator {
         tally(entities, kind: .feeding, childID: childID, period: period, now: now)
     }
 
-    /// Pumping session count and total amount (ml) per day.
+    /// Pumping session count and total amount (ml) per day, for one child. Only for a server
+    /// without the milk stash: with it, pumping belongs to a parent (``pumpingByDay(_:parentID:period:now:)``).
     func pumpingByDay(_ entities: [LocalEntity], childID: Int,
                       period: ChartPeriod, now: Date = .now) -> [DailyTally] {
         tally(entities, kind: .pumping, childID: childID, period: period, now: now)
     }
 
+    /// Pumping session count and total amount (ml) per day, for one parent: the sessions whose
+    /// payload `parent` is `parentID`, whichever child (if any) they also carry.
+    func pumpingByDay(_ entities: [LocalEntity], parentID: Int,
+                      period: ChartPeriod, now: Date = .now) -> [DailyTally] {
+        let sessions = entities.filter {
+            $0.kind == .pumping && $0.syncState != .pendingDelete
+                && ($0.payloadObject["parent"] as? Int) == parentID
+        }
+        return tally(sessions, period: period, now: now)
+    }
+
     private func tally(_ entities: [LocalEntity], kind: EntityKind, childID: Int,
                        period: ChartPeriod, now: Date) -> [DailyTally] {
+        tally(matching(entities, kind: kind, childID: childID), period: period, now: now)
+    }
+
+    /// Per-day count and summed `amount` of records already narrowed to the ones that count.
+    private func tally(_ records: [LocalEntity], period: ChartPeriod, now: Date) -> [DailyTally] {
         var counts = [Date: Int]()
         var amounts = [Date: Double]()
-        for entity in matching(entities, kind: kind, childID: childID) {
+        for entity in records {
             let day = calendar.startOfDay(for: entity.timestamp)
             counts[day, default: 0] += 1
             // JSON numbers decode as NSNumber, so a stored int or double both bridge to Double;
