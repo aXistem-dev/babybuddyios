@@ -78,7 +78,7 @@ struct ActivityDraft {
             if medName.trimmingCharacters(in: .whitespaces).isEmpty { return .medicationNameRequired }
             if !dosage.trimmingCharacters(in: .whitespaces).isEmpty, Self.number(dosage) == nil { return .notANumber }
             return isFuture(time) ? .futureTimestamp : nil
-        case .timer, .child:
+        case .timer, .child, .parent, .stashAdjustment:
             return nil // not editable in this form
         }
     }

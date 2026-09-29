@@ -328,7 +328,7 @@ struct EntityEditorView: View {
                     pickerRow("Time", selection: $time, components: [.date, .hourAndMinute])
                 case .weight, .height, .headCircumference, .bmi:
                     pickerRow("Date", selection: $date, components: .date)
-                case .timer, .child:
+                case .timer, .child, .parent, .stashAdjustment:
                     EmptyView()
                 }
             }
@@ -402,7 +402,7 @@ struct EntityEditorView: View {
             }
         case .medication:
             medicationDetails
-        case .timer, .child:
+        case .timer, .child, .parent, .stashAdjustment:
             EmptyView()
         }
     }
@@ -957,7 +957,7 @@ struct EntityEditorView: View {
             p["dosage_unit"] = dosageUnit
             p["next_dose_interval"] = doseIntervalSeconds.map(APIDuration.string(from:)) ?? NSNull()
             p["notes"] = notes; p["tags"] = tagList
-        case .timer, .child:
+        case .timer, .child, .parent, .stashAdjustment:
             break
         }
         // Preserve the server id when editing so the payload round-trips.
