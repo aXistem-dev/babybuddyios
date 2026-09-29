@@ -85,16 +85,22 @@ struct EntityEditorView: View {
     @State private var doseInterval: DoseInterval = .none
     @State private var customDoseHours = ""
     @State private var customDoseMinutes = ""
-    // Pumping, on a server with the milk stash: who pumped, and how much went into the stash.
+    // On a server with the milk stash: who pumped (or breastfed), and how much went into the stash
+    // (pumping) or came out of it (a breast-milk bottle).
     @State private var parentID: Int?
     @State private var toStash = true
-    /// Millilitres put into the stash; follows the amount until edited under "More".
+    /// Millilitres put into, or taken from, the stash; follows the amount until edited under "More".
     @State private var storedAmount = ""
     @State private var showsStashDetails = false
+    // Feeding, on a server with the milk stash: a bottle taken from the stash, and any of it discarded.
+    @State private var fromStash = false
+    @State private var discardsSome = false
+    @State private var discardedAmount = ""
+    @State private var discardReason = ""
 
     /// Every cached dose, so a dose synced in while the editor is open still raises the warning.
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" }) private var medications: [LocalEntity]
-    /// The cached parents, for "Who pumped" on a server with the milk stash.
+    /// The cached parents, for "Who pumped" and "Breastfed by" on a server with the milk stash.
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "parent" }) private var parents: [LocalEntity]
 
     @State private var confirmingDelete = false
@@ -208,6 +214,10 @@ struct EntityEditorView: View {
         babySection
         sectioned("When") { whenCard }
         sectioned(detailsTitle) { detailsCard }
+            // The stash amount tracks the amount until it's changed on its own.
+            .onChange(of: amount) { old, new in
+                if storedAmount == old { storedAmount = new }
+            }
         sectioned("Tags") { tagsCard }
         if showsNotes { sectioned("Notes") { notesCard } }
         doseWarning
@@ -414,8 +424,13 @@ struct EntityEditorView: View {
         }
     }
 
+    /// Upstream's type, method and amount, unless the server has the milk stash: then a breastfeed
+    /// says which parent gave it when the child has several, and a breast-milk bottle whether it was
+    /// taken from the stash and how much of it was discarded.
     private var feedingDetails: some View {
-        BBCard(cornerRadius: BBRadius.tile) {
+        let capable = StashCapability.isSupported
+        let breastfedBy = linkedParentChoices
+        return BBCard(cornerRadius: BBRadius.tile) {
             VStack(alignment: .leading, spacing: 16) {
                 fieldLabeled("Type") {
                     BBSegmentedControl(selection: $feedingType,
@@ -424,7 +439,26 @@ struct EntityEditorView: View {
                 fieldLabeled("Method") {
                     menuField(options: FeedingMethod.allCases, selection: $feedingMethod) { $0.label }
                 }
+                if capable, Self.breastMethods.contains(feedingMethod), breastfedBy.count >= 2 {
+                    fieldLabeled("Breastfed by") { parentPicker(breastfedBy, none: "None") }
+                }
                 fieldLabeled("Amount") { amountStepper }
+                if capable, Self.isStashBottle(type: feedingType, method: feedingMethod) {
+                    Toggle(isOn: $fromStash) { Text("Taken from stash").font(.body) }
+                        .tint(BBColor.primary)
+                    if fromStash {
+                        stashAmountDetails("Amount from stash")
+                        Toggle(isOn: $discardsSome) { Text("Some was discarded").font(.body) }
+                            .tint(BBColor.primary)
+                        if discardsSome {
+                            fieldLabeled("Amount discarded") { amountField($discardedAmount) }
+                            fieldLabeled("Reason (optional)") {
+                                insetField(TextField("Reason (optional)", text: $discardReason,
+                                                     prompt: Text("Spilled, left over…")))
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -436,27 +470,27 @@ struct EntityEditorView: View {
         return BBCard(cornerRadius: BBRadius.tile) {
             VStack(alignment: .leading, spacing: 16) {
                 if capable, !parentChoices.isEmpty {
-                    fieldLabeled("Who pumped") { parentPicker }
+                    fieldLabeled("Who pumped") { parentPicker(parentChoices, none: nil) }
                 }
                 fieldLabeled("Amount") { amountStepper }
                 if capable {
                     Toggle(isOn: $toStash) { Text("Store in stash").font(.body) }
                         .tint(BBColor.primary)
-                    if toStash {
-                        DisclosureGroup("More", isExpanded: $showsStashDetails) {
-                            fieldLabeled("Amount stored") { amountField($storedAmount) }
-                                .padding(.top, 8)
-                                .onAppear { if storedAmount.isEmpty { storedAmount = amount } }
-                        }
-                        .tint(BBColor.brandAccent)
-                    }
+                    if toStash { stashAmountDetails("Amount stored") }
                 }
             }
         }
-        // The stored amount tracks the amount until it's changed on its own.
-        .onChange(of: amount) { old, new in
-            if storedAmount == old { storedAmount = new }
+    }
+
+    /// "More" under a stash switch: how much of the amount went into, or came out of, the stash.
+    /// Starts at the amount, and follows it until changed on its own.
+    private func stashAmountDetails(_ label: String) -> some View {
+        DisclosureGroup("More", isExpanded: $showsStashDetails) {
+            fieldLabeled(label) { amountField($storedAmount) }
+                .padding(.top, 8)
+                .onAppear { if storedAmount.isEmpty { storedAmount = amount } }
         }
+        .tint(BBColor.brandAccent)
     }
 
     /// The cached parents by first name, for "Who pumped".
@@ -469,13 +503,22 @@ struct EntityEditorView: View {
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
-    /// A segment per parent, or a menu when there are too many to fit. Nothing is selected when
-    /// the child has several parents and the entry isn't one of theirs yet.
-    @ViewBuilder private var parentPicker: some View {
-        let choices = parentChoices
-        let options = choices.map { Optional($0.id) }
-        let name: (Int?) -> String = { id in choices.first { $0.id == id }?.name ?? "Choose" }
-        if choices.count <= 3 {
+    /// The cached parents linked to this child, for "Breastfed by".
+    private var linkedParentChoices: [(id: Int, name: String)] {
+        let linked = EntityVisibility.parentIDs(forChild: childID, in: parents)
+        return parentChoices.filter { linked.contains($0.id) }
+    }
+
+    /// A segment per parent, or a menu when there are too many to fit. With a `none` label, a first
+    /// option clears the choice; without one, nothing is selected when the child has several
+    /// parents and the entry isn't one of theirs yet.
+    @ViewBuilder private func parentPicker(_ choices: [(id: Int, name: String)], none: String?) -> some View {
+        let options: [Int?] = (none == nil ? [] : [Int?.none]) + choices.map { Optional($0.id) }
+        let name: (Int?) -> String = { id in
+            if id == nil, let none { return none }
+            return choices.first { $0.id == id }?.name ?? "Choose"
+        }
+        if options.count <= 3 {
             BBSegmentedControl(selection: $parentID, options: options, label: name)
         } else {
             menuField(options: options, selection: $parentID, label: name)
@@ -620,7 +663,12 @@ struct EntityEditorView: View {
     }
 
     private func plainField(_ placeholder: String, text: Binding<String>) -> some View {
-        TextField(placeholder, text: text)
+        insetField(TextField(placeholder, text: text))
+    }
+
+    /// The inset, hairline-bordered look of the editor's text inputs.
+    private func insetField<Field: View>(_ field: Field) -> some View {
+        field
             .padding(.horizontal, 14).padding(.vertical, 11)
             .background(BBColor.nested, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay {
@@ -885,6 +933,7 @@ struct EntityEditorView: View {
         // the stash as the server's default says. An edit loads its own below.
         parentID = Self.defaultParentID(forChild: childID, in: parents)
         toStash = StashCapability.summary?.defaults.pumping_to_stash ?? true
+        fromStash = StashCapability.summary?.defaults.bottle_from_stash ?? false
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
             if let s = timer.payloadObject["start"] as? String, let d = APIDate.parse(s) { start = d }
@@ -906,11 +955,21 @@ struct EntityEditorView: View {
         if let t = p["type"] as? String, let ft = FeedingType(rawValue: t) { feedingType = ft }
         if let m = p["method"] as? String, let fm = FeedingMethod(rawValue: m) { feedingMethod = fm }
         if let a = p["amount"] as? Double { amount = trimmed(a) }
-        if entity != nil, kind == .pumping {
-            if let parent = p["parent"] as? Int { parentID = parent }
+        if entity != nil, kind == .pumping || kind == .feeding {
             let stashed = p["stash_amount"] as? Double
-            toStash = stashed != nil
             if let stashed { storedAmount = trimmed(stashed) }
+            if kind == .pumping {
+                if let parent = p["parent"] as? Int { parentID = parent }
+                toStash = stashed != nil
+            } else {
+                parentID = p["parent"] as? Int
+                fromStash = stashed != nil
+                if let discarded = p["stash_discarded"] as? Double, discarded > 0 {
+                    discardsSome = true
+                    discardedAmount = trimmed(discarded)
+                }
+                discardReason = p["stash_discard_reason"] as? String ?? ""
+            }
         }
         wet = p["wet"] as? Bool ?? wet
         solid = p["solid"] as? Bool ?? solid
@@ -999,6 +1058,15 @@ struct EntityEditorView: View {
             p["type"] = feedingType.rawValue; p["method"] = feedingMethod.rawValue
             if let a = ActivityDraft.number(amount) { p["amount"] = a }
             p["notes"] = notes; p["tags"] = tagList
+            let capable = StashCapability.isSupported
+            p.merge(Self.feedingStashFields(type: feedingType, method: feedingMethod, fromStash: fromStash,
+                                            amount: ActivityDraft.number(amount),
+                                            stashAmount: ActivityDraft.number(storedAmount),
+                                            discarded: discardsSome ? ActivityDraft.number(discardedAmount) : nil,
+                                            discardReason: discardReason, capable: capable)) { $1 }
+            p.merge(Self.feedingParentField(method: feedingMethod, parentID: breastfeedingParentID,
+                                            linkedParentCount: linkedParentChoices.count,
+                                            isNew: entity == nil, capable: capable)) { $1 }
         case .change:
             p["time"] = iso(time); p["wet"] = wet; p["solid"] = solid
             if let color { p["color"] = color.rawValue }
@@ -1062,6 +1130,61 @@ struct EntityEditorView: View {
     static func defaultParentID(forChild child: Int, in entities: [LocalEntity]) -> Int? {
         let linked = EntityVisibility.parentIDs(forChild: child, in: entities)
         return linked.count == 1 ? linked.first : nil
+    }
+
+    /// The methods that are a breastfeed, the only ones the server keeps a feeding's `parent` on.
+    private static let breastMethods: Set<FeedingMethod> = [.leftBreast, .rightBreast, .bothBreasts]
+
+    /// A feeding that can come from the milk stash: breast milk, fortified or not, from a bottle.
+    private static func isStashBottle(type: FeedingType, method: FeedingMethod) -> Bool {
+        (type == .breastMilk || type == .fortifiedBreastMilk) && method == .bottle
+    }
+
+    /// A feeding's milk stash fields. Nothing without the milk stash (`capable`). A breast-milk bottle
+    /// taken from the stash sends `stash_amount` (the amount from the stash, else the whole amount)
+    /// and, when some was discarded, `stash_discarded` with its reason, trimmed and cut to the
+    /// server's 255 characters. Anything else sends the three cleared, so an edit that stops a bottle
+    /// coming from the stash (or discarding some) removes it on the server. The discard and its
+    /// reason always go together, and a discard never goes without a `stash_amount`: the server
+    /// refuses either.
+    static func feedingStashFields(type: FeedingType, method: FeedingMethod, fromStash: Bool, amount: Double?,
+                                   stashAmount: Double?, discarded: Double?, discardReason: String?,
+                                   capable: Bool) -> [String: Any] {
+        guard capable else { return [:] }
+        let taken: Double? = fromStash && isStashBottle(type: type, method: method) ? (stashAmount ?? amount) : nil
+        guard let taken else {
+            return ["stash_amount": NSNull(), "stash_discarded": NSNull(), "stash_discard_reason": ""]
+        }
+        guard let discarded, discarded > 0 else {
+            return ["stash_amount": taken, "stash_discarded": NSNull(), "stash_discard_reason": ""]
+        }
+        // The server counts characters as code points, so cut by those.
+        let reason = (discardReason ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let capped = String(String.UnicodeScalarView(reason.unicodeScalars.prefix(255)))
+        return ["stash_amount": taken, "stash_discarded": discarded, "stash_discard_reason": capped]
+    }
+
+    /// Who breastfed, on a server with the milk stash (`capable`), for a breastfeed only: the server
+    /// drops a parent on other methods. The chosen parent, else nothing on a new feeding (the server
+    /// fills in the child's only parent), else a cleared parent when the child has several to
+    /// choose from.
+    static func feedingParentField(method: FeedingMethod, parentID: Int?, linkedParentCount: Int, isNew: Bool,
+                                   capable: Bool) -> [String: Any] {
+        guard capable, breastMethods.contains(method) else { return [:] }
+        if let parentID { return ["parent": parentID] }
+        if !isNew, linkedParentCount >= 2 { return ["parent": NSNull()] }
+        return [:]
+    }
+
+    /// Who breastfed. An edit keeps the picker's value. A new feeding takes the child's only parent
+    /// when the picker is hidden, and otherwise the pick when it's one of the child's parents, never
+    /// one chosen for a pumping before switching kinds.
+    private var breastfeedingParentID: Int? {
+        if isEditing { return parentID }
+        let linked = linkedParentChoices.map { $0.id }
+        if linked.count < 2 { return linked.first }
+        guard let parentID, linked.contains(parentID) else { return nil }
+        return parentID
     }
 
     /// The chosen next-dose interval in seconds; a blank or zero custom entry means none.
