@@ -64,9 +64,9 @@ enum StashUse {
 
 /// The warning shown while the stash balance is below zero: more milk was logged leaving the stash
 /// than going in, usually because the milk that was in it before the app was used was never added.
-/// Dismissing it is remembered in the App Group's defaults; Settings turns it back on.
+/// Dismissing it is remembered in the App Group's defaults until sign-out; Settings turns it back on.
 enum StashNegativeWarning {
-    static let dismissedKey = "stashNegativeWarningDismissed"
+    static let dismissedKey = StashCapability.negativeWarningDismissedKey
 
     static let message = "More milk left the stash than was ever logged going in. Fix it with an \"Added\" entry dated before the first bottle."
 

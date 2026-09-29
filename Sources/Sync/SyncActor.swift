@@ -90,7 +90,7 @@ actor SyncActor {
     /// (the stash card, the milk age alerts) refreshes.
     private func refreshStash(client: APIClient) async -> Bool {
         let wasSupported = StashCapability.isSupported
-        let previous = Self.ignoringAge(StashCapability.summary)
+        let previous = StashCapability.summary
         do {
             let root = try await client.getRawPath("")
             StashCapability.update(rootJSON: root)
@@ -111,13 +111,21 @@ actor SyncActor {
             Analytics.error(network: "pull-stash")
         }
         return StashCapability.isSupported != wasSupported
-            || Self.ignoringAge(StashCapability.summary) != previous
+            || Self.stashSummaryChanged(from: previous, to: StashCapability.summary)
     }
 
-    /// A summary with its age readings cleared. They tick with the clock on every request, while
-    /// what the stash shows and alerts on (amounts, lot times, status) changes only with the data
-    /// or when a lot crosses an age limit, so a sync that brought nothing new stays a no-op.
-    private static func ignoringAge(_ summary: StashSummaryDTO?) -> StashSummaryDTO? {
+    /// Whether the stash summary changed in what the stash shows and alerts on, so a sync that
+    /// brought nothing new stays a no-op. Both sides are compared as ``comparable(_:)`` makes them,
+    /// whichever of them came from the cache and whichever straight from the server.
+    static func stashSummaryChanged(from previous: StashSummaryDTO?, to current: StashSummaryDTO?) -> Bool {
+        comparable(previous) != comparable(current)
+    }
+
+    /// A summary with its age readings cleared, and its dates as the cache keeps them. The ages tick
+    /// with the clock on every request, while amounts, lot times and status change only with the
+    /// data or when a lot crosses an age limit. The cache stores dates in whole seconds and the
+    /// server may send microseconds, so both sides go through the same encoder and decoder.
+    private static func comparable(_ summary: StashSummaryDTO?) -> StashSummaryDTO? {
         guard var summary else { return nil }
         summary.oldest_age_hours = nil
         summary.lots = summary.lots.map { lot in
@@ -125,7 +133,9 @@ actor SyncActor {
             lot.age_hours = 0
             return lot
         }
-        return summary
+        guard let data = try? APICoders.encoder.encode(summary),
+              let coded = try? APICoders.decoder.decode(StashSummaryDTO.self, from: data) else { return summary }
+        return coded
     }
 
     /// Report a pull failure and turn it into the outcome the caller surfaces. `endpoint` is the
