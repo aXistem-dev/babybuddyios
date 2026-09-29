@@ -4,7 +4,8 @@ import XCTest
 /// `BB_NO_STASH=1` runs the demo as a server without it.
 final class StashTests: UITestCase {
     /// A new pumping is logged on the child's only parent and goes into the stash by default. It
-    /// has no child, and still shows on the child's timeline. (Demo history pumps 60–140 ml.)
+    /// has no child, and still shows on the stash screen and the child's timeline. (Demo history
+    /// pumps 60–140 ml.)
     func testPumpingLogsOnParentIntoStash() {
         launch()
         openEditor("Pumping")
@@ -17,6 +18,9 @@ final class StashTests: UITestCase {
         amount.typeText("185")
         tap(bar.buttons["Save"])
         expectGone(bar)
+
+        openStash()
+        expect(elements("label BEGINSWITH 'Pumping, ' AND label CONTAINS '185 ml'").firstMatch)
 
         tap(app.tabBars.buttons["Timeline"])
         let search = app.searchFields.firstMatch
@@ -81,6 +85,93 @@ final class StashTests: UITestCase {
         expectValue(app.switches["Some was discarded"], "1")
         expect(app.textFields.matching(NSPredicate(format: "value == %@", "10")).firstMatch)
         expect(app.textFields.matching(NSPredicate(format: "value == %@", "Spilled")).firstMatch)
+    }
+
+    // MARK: Stash screen
+
+    /// Home ▸ Milk stash.
+    private func openStash() {
+        tap(app.buttons.labeled("Milk stash"))
+        expect(app.navigationBars["Milk stash"])
+    }
+
+    /// The stash screen's balance, e.g. 315 from "In the stash, 315 ml". The demo's amounts are
+    /// whole millilitres.
+    private func balance() -> Int {
+        let label = expect(element(labeled: "In the stash, ")).label
+        let figure = label.dropFirst("In the stash, ".count).replacingOccurrences(of: " ml", with: "")
+        return Int(figure) ?? .min
+    }
+
+    /// Discarding milk logs a stash entry with its reason, and the balance drops by it once the
+    /// sync after saving has refreshed the summary.
+    func testDiscardMilkFromStash() {
+        launch()
+        openStash()
+        let before = balance()
+        XCTAssertNotEqual(before, .min, "The demo summary has a balance")
+
+        tap(app.buttons["Discard milk"])
+        let bar = expect(app.navigationBars["New Stash adjustment"])
+        XCTAssertTrue(expect(app.buttons["Discarded"]).isSelected)
+        XCTAssertFalse(app.staticTexts["Whose milk"].exists, "Robin is the only parent")
+        let amount = app.textFields["0"]
+        tap(amount)
+        amount.typeText("20")
+        let reason = app.textFields["Reason (optional)"]
+        tap(reason)
+        reason.typeText("Spilled")
+        tap(bar.buttons["Save"])
+        expectGone(bar)
+
+        expect(elements("label BEGINSWITH 'Stash adjustment, ' AND label CONTAINS '20 ml · Spilled'").firstMatch)
+        expect(element(labeled: "In the stash, \(before - 20) ml"))
+    }
+
+    /// The demo's oldest lot (Robin's 240 ml session, 80 h ago, 35 ml left after the bottles and
+    /// discards since) has expired. "Throw away" on it opens a discard pre-filled with what's left
+    /// and why.
+    func testThrowAwayExpiredLot() {
+        launch()
+        openStash()
+        expect(app.buttons["Throw away all expired milk"])
+        tap(app.buttons["Throw away"])
+        expect(app.navigationBars["New Stash adjustment"])
+        XCTAssertTrue(expect(app.buttons["Discarded"]).isSelected)
+        expect(app.textFields.matching(NSPredicate(format: "value == %@", "35")).firstMatch)
+        expect(app.textFields.matching(NSPredicate(format: "value == %@", "Older than 72 h")).firstMatch)
+    }
+
+    /// The 10 ml spilled from a demo bottle is that bottle's: read-only here, with no Save or
+    /// Delete, and a way to the bottle.
+    func testLinkedDiscardEditsOnItsFeeding() {
+        launch()
+        openStash()
+        tap(elements("label BEGINSWITH 'Stash adjustment, ' AND label CONTAINS '10 ml · Spilled'").firstMatch)
+        let bar = expect(app.navigationBars["Edit Stash adjustment"])
+        XCTAssertFalse(bar.buttons["Save"].isEnabled)
+        XCTAssertFalse(app.buttons["Delete Stash adjustment"].exists)
+        XCTAssertFalse(app.buttons["Discarded"].exists, "The kind isn't editable here")
+
+        tap(app.buttons["Edit on the feeding"])
+        expect(app.navigationBars["Edit Feeding"])
+        expectValue(app.switches["Some was discarded"], "1")
+    }
+
+    /// Settings turns the stash's below-zero warning back on after it was dismissed; the row is
+    /// only there with the milk stash.
+    func testBelowZeroWarningSetting() {
+        launch(["BB_START_TAB": "settings"])
+        expectValue(app.switches["Below-zero stash warning"], "1")
+    }
+
+    func testNoStashCardWithoutStash() {
+        launch(["BB_NO_STASH": "1"])
+        expect(app.buttons["Add"])
+        XCTAssertFalse(app.buttons.labeled("Milk stash").exists)
+        tap(app.tabBars.buttons["Settings"])
+        expect(app.navigationBars["Settings"])
+        XCTAssertFalse(app.switches["Below-zero stash warning"].exists)
     }
 
     /// Without the milk stash a breast-milk bottle is upstream's: no stash switch.

@@ -269,6 +269,11 @@ struct LocalRepository {
     func repeatEvent(_ entity: LocalEntity, now: Date = .now) -> LocalEntity? {
         var p = entity.payloadObject
         for key in ["id", "url", "duration"] { p.removeValue(forKey: key) }
+        // A stash entry's signed amount is computed by the server, and a repeat is a free entry of
+        // its own, never another bottle's discard (those can't be repeated at all).
+        if entity.kind == .stashAdjustment {
+            for key in ["signed_amount", "feeding"] { p.removeValue(forKey: key) }
+        }
 
         func iso(_ d: Date) -> String { APIDate.isoDateTime.string(from: d) }
         if let s = p["start"] as? String, let e = p["end"] as? String,

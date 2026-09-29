@@ -41,6 +41,10 @@ struct DashboardView: View {
     /// A convert deferred until the Stop sheet finishes dismissing, so the detail editor doesn't
     /// try to present while another sheet is still on screen.
     @State private var pendingConvert: ConvertRequest?
+    /// The milk stash summary, on a server with the milk stash, for the stash card.
+    @State private var stash = StashViewModel()
+    /// The milk stash screen, pushed from the stash card or `babybuddy://stash`.
+    @State private var showingStash = false
 
     // MARK: Support nudge state
     //
@@ -154,6 +158,7 @@ struct DashboardView: View {
                         }
 
                         todaySection
+                        if stash.isSupported { stashCard }
                         if !latestEvents.isEmpty { latestSection }
                     }
                 }
@@ -166,6 +171,9 @@ struct DashboardView: View {
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: EntityKind.self) { kind in
                 DayTimelineView(kind: kind, childID: selectedChildID)
+            }
+            .navigationDestination(isPresented: $showingStash) {
+                StashView(childID: selectedChildID)
             }
             .overlay(alignment: .bottom) {
                 UndoToastView().padding(.bottom, 84) // clear of the floating add button
@@ -234,6 +242,7 @@ struct DashboardView: View {
             .onChange(of: router.convertTarget) { _, target in openConvert(target) }
             .onChange(of: router.openDayKind) { _, kind in openDay(kind) }
             .onChange(of: router.repeatDoseLocalID) { _, id in openRepeatDose(id) }
+            .onChange(of: router.showStash) { _, show in openStash(show) }
             .onAppear {
                 // handle a deep link that arrived before this view existed
                 showTimer(router.openTimerLocalID)
@@ -241,6 +250,7 @@ struct DashboardView: View {
                 openConvert(router.convertTarget)
                 openDay(router.openDayKind)
                 openRepeatDose(router.repeatDoseLocalID)
+                openStash(router.showStash)
                 #if DEBUG
                 if let raw = ProcessInfo.processInfo.environment["BB_OPEN"], !children.isEmpty {
                     if raw == "timer", !startingTimer {
@@ -567,6 +577,41 @@ struct DashboardView: View {
         }
     }
 
+    // MARK: Milk stash
+
+    /// What's in the milk stash and how old it is, and how much of it this child had today. Opens
+    /// the stash screen.
+    private var stashCard: some View {
+        let summary = stash.summary
+        let balance = summary.map { EntityFormatting.formatAmount($0.balance) } ?? "\u{2014}"
+        let below = (summary?.balance ?? 0) < 0
+        let today = EntityFormatting.formatAmount(StashUse.totals(childEntities, childID: selectedChildID).today)
+        let oldest = summary?.oldest_age_hours.map { "oldest \(Int($0)) h" }
+        let detail = ["\(currentChildName) had \(today) today", oldest].compactMap { $0 }.joined(separator: " · ")
+        return Button { showingStash = true } label: {
+            BBCard {
+                HStack(spacing: 12) {
+                    ActivityTile(kind: .stashAdjustment, size: 40, glyph: 21)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Milk stash").font(.headline)
+                        Text(detail).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(balance)
+                            .font(.title3.weight(.semibold)).monospacedDigit()
+                            .foregroundStyle(below ? BBColor.danger : Color.primary)
+                        if let summary { StashStatusChip(status: summary.status) }
+                    }
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(["Milk stash", balance, summary?.status.label, detail]
+            .compactMap { $0 }.joined(separator: ", "))
+    }
+
     /// Wrap a "Today" tile so tapping it pushes a single-day, single-kind timeline slice.
     private func metricLink<Content: View>(_ kind: EntityKind,
                                            @ViewBuilder _ tile: () -> Content) -> some View {
@@ -680,6 +725,13 @@ struct DashboardView: View {
         guard let kind else { return }
         navPath = [kind]
         router.openDayKind = nil
+    }
+
+    /// Push the milk stash screen for `babybuddy://stash`, on a server with the milk stash.
+    private func openStash(_ show: Bool) {
+        guard show else { return }
+        router.showStash = false
+        if StashCapability.isSupported { showingStash = true }
     }
 
     /// Stop tapped: the timer stops now, here and (once the DELETE lands) on the server, then the

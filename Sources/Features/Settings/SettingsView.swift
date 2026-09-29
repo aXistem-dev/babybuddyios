@@ -43,6 +43,9 @@ struct SettingsView: View {
     // Mirrors MedicationReminderPolicy.isEnabled.
     @AppStorage(MedicationReminderPolicy.enabledKey, store: SharedDefaults.suite) private var doseRemindersEnabled = false
     @AppStorage(UndoToastCenter.enabledKey) private var undoToastEnabled = true
+    /// The stash screen's below-zero warning, dismissed there and turned back on here.
+    @AppStorage(StashNegativeWarning.dismissedKey, store: SharedDefaults.suite)
+    private var stashWarningDismissed = false
     // Sick mode (see ``SickMode``): the keys and defaults are the ones it reads.
     @State private var sickMode = SickModeStore.shared
     @State private var medicineColors = MedicineColorStore.shared
@@ -114,6 +117,10 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)
                             .padding(.top, 2)
+                    }
+
+                    if StashCapability.isSupported {
+                        sectioned("Milk stash") { milkStashCard }
                     }
 
                     if icons.isSupported {
@@ -583,6 +590,25 @@ struct SettingsView: View {
             }))
             .labelsHidden()
             .tint(BBColor.primary)
+    }
+
+    // MARK: Milk stash
+
+    /// Only on a server with the milk stash.
+    private var milkStashCard: some View {
+        card {
+            SettingsRow(symbol: "exclamationmark.triangle.fill", tint: BBColor.danger,
+                        title: "Below-zero stash warning") {
+                Toggle("Below-zero stash warning", isOn: Binding(
+                    get: { !stashWarningDismissed },
+                    set: { newValue in
+                        stashWarningDismissed = !newValue
+                        Analytics.settingChanged("stashNegativeWarning", enabled: newValue)
+                    }))
+                    .labelsHidden()
+                    .tint(BBColor.primary)
+            }
+        }
     }
 
     // MARK: Appearance

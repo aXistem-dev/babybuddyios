@@ -145,6 +145,50 @@ final class StashPayloadTests: XCTestCase {
                                                           isNew: false, capable: true).isEmpty)
     }
 
+    // MARK: Stash entries
+
+    private func entry(kind: StashKind = .discarded, amount: Double? = 20, reason: String = " Spilled ",
+                       parentID: Int? = nil, parentCount: Int = 1, isNew: Bool = true) -> [String: Any] {
+        EntityEditorView.stashEntryPayload(kind: kind, amount: amount, time: "2026-06-15T08:00:00Z",
+                                           reason: reason, parentID: parentID, parentCount: parentCount,
+                                           isNew: isNew, notes: "", tags: ["night"])
+    }
+
+    /// A stash entry belongs to the stash, not a child: never a `child` key, and never the server's
+    /// computed `signed_amount` or a bottle link. With one parent the key is left out, so the server
+    /// fills it in on a new entry and keeps its own on an edit.
+    func testStashEntryPayloadHasNoChild() {
+        for isNew in [true, false] {
+            let p = entry(parentID: 1, isNew: isNew)
+            XCTAssertNil(p["child"])
+            XCTAssertNil(p["signed_amount"])
+            XCTAssertNil(p["feeding"])
+            XCTAssertNil(p["parent"], "One parent: the server's to fill in")
+            XCTAssertEqual(p["kind"] as? String, "discarded")
+            XCTAssertEqual(p["amount"] as? Double, 20)
+            XCTAssertEqual(p["reason"] as? String, "Spilled")
+            XCTAssertEqual(p["time"] as? String, "2026-06-15T08:00:00Z")
+            XCTAssertEqual(p["tags"] as? [String], ["night"])
+            XCTAssertEqual(p["notes"] as? String, "")
+        }
+        XCTAssertEqual(entry(kind: .added, reason: "")["kind"] as? String, "added")
+        XCTAssertEqual(entry(reason: "")["reason"] as? String, "")
+    }
+
+    /// With several parents: the pick, else nothing on a new entry and a cleared parent on an edit.
+    func testStashEntryParentWithSeveralParents() {
+        XCTAssertEqual(entry(parentID: 2, parentCount: 2)["parent"] as? Int, 2)
+        XCTAssertEqual(entry(parentID: 2, parentCount: 2, isNew: false)["parent"] as? Int, 2)
+        XCTAssertNil(entry(parentID: nil, parentCount: 2, isNew: true)["parent"])
+        XCTAssertTrue(entry(parentID: nil, parentCount: 3, isNew: false)["parent"] is NSNull)
+        XCTAssertNil(entry(parentID: nil, parentCount: 0, isNew: false)["parent"])
+    }
+
+    func testStashEntryReasonCappedAt255() {
+        let p = entry(reason: String(repeating: "b", count: 300))
+        XCTAssertEqual((p["reason"] as? String)?.unicodeScalars.count, 255)
+    }
+
     private func parent(_ id: Int, _ name: String, children: [Int]) -> LocalEntity {
         let payload: [String: Any] = ["id": id, "first_name": name, "children": children]
         let data = try! JSONSerialization.data(withJSONObject: payload)
