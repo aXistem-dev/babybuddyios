@@ -82,6 +82,8 @@ final class SyncEngine {
         if pulledChanges { await LocalAlerts.shared.reconcile() }
         let changed = push.delivered > 0 || uploads.delivered > 0 || pulledChanges
         reportOutcome(push, uploads, changed: changed)
+        // The stash summary is re-read from here (``StashViewModel``), after the pull cached it.
+        NotificationCenter.default.post(name: .syncDidFinish, object: nil)
     }
 
     /// What one pass over a queue did: the facts that separate a drained sync from a partial one.

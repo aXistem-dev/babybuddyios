@@ -76,17 +76,22 @@ struct TimelineView: View {
                             .listRowBackground(Color.clear)
                             .contentShape(Rectangle())
                             .onTapGesture { editing = entity }
+                            // A bottle's linked stash discard is changed on its bottle: no Repeat, no Delete.
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                Button { repeatEvent(entity) } label: {
-                                    Label("Repeat", systemImage: "arrow.clockwise")
+                                if !entity.isLinkedStashDiscard {
+                                    Button { repeatEvent(entity) } label: {
+                                        Label("Repeat", systemImage: "arrow.clockwise")
+                                    }
+                                    .tint(BBColor.repeatAction)
                                 }
-                                .tint(BBColor.repeatAction)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) { delete(entity) } label: {
-                                    Label("Delete", systemImage: "trash")
+                                if !entity.isLinkedStashDiscard {
+                                    Button(role: .destructive) { delete(entity) } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    .tint(BBColor.danger)
                                 }
-                                .tint(BBColor.danger)
                                 Button { editing = entity } label: {
                                     Label("Edit", systemImage: "pencil")
                                 }

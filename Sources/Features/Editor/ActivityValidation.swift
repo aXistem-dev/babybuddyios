@@ -5,6 +5,7 @@ import Foundation
 /// family data (no dates, durations, amounts, or child ids).
 enum ActivityProblem: Equatable {
     case amountRequired
+    case stashAmountRequired
     case valueRequired
     case notANumber
     case noteRequired
@@ -19,6 +20,7 @@ enum ActivityProblem: Equatable {
     var message: String {
         switch self {
         case .amountRequired:        return "Enter how much was pumped — Baby Buddy needs an amount."
+        case .stashAmountRequired:   return "Enter how much milk, more than 0 ml."
         case .valueRequired:         return "Enter a value."
         case .notANumber:            return "That isn't a number Baby Buddy can read. Use digits, like 90 or 4.5."
         case .noteRequired:          return "Write something for this note."
@@ -84,7 +86,9 @@ struct ActivityDraft {
             if medName.trimmingCharacters(in: .whitespaces).isEmpty { return .medicationNameRequired }
             if !dosage.trimmingCharacters(in: .whitespaces).isEmpty, Self.number(dosage) == nil { return .notANumber }
             return isFuture(time) ? .futureTimestamp : nil
-        case .timer, .child, .parent, .stashAdjustment:
+        case .stashAdjustment:
+            return stashAmountProblem ?? (isFuture(time) ? .futureTimestamp : nil)
+        case .timer, .child, .parent:
             return nil // not editable in this form
         }
     }
@@ -95,6 +99,13 @@ struct ActivityDraft {
         if amount.trimmingCharacters(in: .whitespaces).isEmpty { return required ? .amountRequired : nil }
         guard let parsed = Self.number(amount), parsed >= 0 else { return .notANumber }
         return nil
+    }
+
+    /// A stash entry moves some milk: an amount above zero.
+    private var stashAmountProblem: ActivityProblem? {
+        if amount.trimmingCharacters(in: .whitespaces).isEmpty { return .stashAmountRequired }
+        guard let parsed = Self.number(amount) else { return .notANumber }
+        return parsed > 0 ? nil : .stashAmountRequired
     }
 
     private var parentProblem: ActivityProblem? {

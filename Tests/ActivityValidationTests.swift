@@ -199,6 +199,17 @@ final class ActivityValidationTests: XCTestCase {
                      "Only pumping is logged on a parent")
     }
 
+    /// A stash entry needs an amount above zero, at a time that isn't in the future.
+    func testStashEntryNeedsAmount() {
+        XCTAssertEqual(ActivityDraft(kind: .stashAdjustment, time: now, now: now).problem, .stashAmountRequired)
+        XCTAssertEqual(ActivityDraft(kind: .stashAdjustment, time: now, amount: "0", now: now).problem,
+                       .stashAmountRequired)
+        XCTAssertEqual(ActivityDraft(kind: .stashAdjustment, time: now, amount: "abc", now: now).problem, .notANumber)
+        XCTAssertEqual(ActivityDraft(kind: .stashAdjustment, time: now.addingTimeInterval(3600), amount: "20",
+                                     now: now).problem, .futureTimestamp)
+        XCTAssertNil(ActivityDraft(kind: .stashAdjustment, time: now, amount: "20,5", now: now).problem)
+    }
+
     func testUneditableKindsAreNeverBlocked() {
         XCTAssertNil(ActivityDraft(kind: .timer, now: now).problem)
         XCTAssertNil(ActivityDraft(kind: .child, now: now).problem)
@@ -206,7 +217,7 @@ final class ActivityValidationTests: XCTestCase {
 
     func testEveryProblemHasAMessage() {
         let problems: [ActivityProblem] = [
-            .amountRequired, .valueRequired, .notANumber, .noteRequired, .medicationNameRequired, .parentRequired,
+            .amountRequired, .stashAmountRequired, .valueRequired, .notANumber, .noteRequired, .medicationNameRequired, .parentRequired,
             .startAfterEnd, .over24Hours, .futureTimestamp, .futureDate,
         ]
         for problem in problems {

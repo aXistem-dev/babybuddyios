@@ -56,6 +56,14 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.repeatDoseLocalID, id)
     }
 
+    /// `babybuddy://stash` opens the milk stash screen.
+    func testStashLinkOpensStash() {
+        let router = DeepLinkRouter()
+        XCTAssertFalse(router.showStash)
+        XCTAssertTrue(router.handle(URL(string: "babybuddy://stash")!))
+        XCTAssertTrue(router.showStash)
+    }
+
     func testForeignSchemeIsRejected() {
         let router = DeepLinkRouter()
         XCTAssertFalse(router.handle(URL(string: "https://example.com")!))
