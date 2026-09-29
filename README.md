@@ -67,6 +67,24 @@ multiple children run through all of it.
 | 🔒 **Locked down** | Credentials stay in your Keychain, with an optional Face ID or Touch ID lock. |
 | 🎨 **Six app icons** | Swap the Home Screen icon under **Settings → Appearance → App Icon**. |
 
+## Milk stash
+
+The milk stash needs a Baby Buddy server with the milk stash feature. On a server without it nothing
+changes: no stash screen appears and no stash fields are sent.
+
+When the server supports it, the app adds:
+
+- **Parents and pumping.** Pumping is logged for a parent rather than a child, and shows in the
+  timeline of every child linked to that parent. A pumping session can go into the stash.
+- **Bottles from the stash.** A breast-milk bottle can be taken from the stash, with an optional
+  "Some was discarded" amount and reason.
+- **A Milk stash screen.** The balance, each lot with its age, per-baby use over the last days, and
+  the stash entries (milk added or discarded). The balance can go below zero, and the app warns when it does.
+- **Throw away.** Milk is used oldest first, so only the oldest expired lot can be thrown away on its
+  own; "Throw away all expired milk" takes every expired lot at once.
+- **Milk age alerts.** Optional notifications, one when a lot should be used first and one when it
+  is too old (Settings, "Milk age alerts").
+
 ## Your baby's records stay with you
 
 Baby tracking data syncs only between the app and your
