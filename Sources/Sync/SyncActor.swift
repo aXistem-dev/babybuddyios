@@ -84,7 +84,8 @@ actor SyncActor {
     }
 
     /// Refresh whether the server has the milk stash (its API root lists the stash routes) and, if
-    /// it does, the cached stash summary. Never fails the sync: an error keeps what was cached.
+    /// it does, the cached stash summary. Never fails the sync: a network or HTTP error keeps what
+    /// was cached, and a summary that doesn't decode is reported and cleared.
     /// Returns whether either changed, so the pull counts as a change and what shows the stash
     /// (the stash card, the milk age alerts) refreshes.
     private func refreshStash(client: APIClient) async -> Bool {
@@ -95,7 +96,14 @@ actor SyncActor {
             StashCapability.update(rootJSON: root)
             if StashCapability.isSupported {
                 let data = try await client.getRawPath("stash")
-                StashCapability.store(summary: try? APICoders.decoder.decode(StashSummaryDTO.self, from: data))
+                do {
+                    let summary = try APICoders.decoder.decode(StashSummaryDTO.self, from: data)
+                    StashCapability.store(summary: summary)
+                } catch {
+                    // A summary this app can't read is dropped rather than shown stale, and reported.
+                    Analytics.report(.decoding(String(describing: error)), context: "pull-stash")
+                    StashCapability.store(summary: nil)
+                }
             }
         } catch let error as APIError {
             Analytics.report(error, context: "pull-stash")

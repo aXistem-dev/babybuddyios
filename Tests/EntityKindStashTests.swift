@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import BabyBuddy
 
 /// The parent and stash-adjustment kinds, and the milk stash DTOs decoding the server's JSON.
@@ -20,6 +21,20 @@ final class EntityKindStashTests: XCTestCase {
         XCTAssertEqual(EntityKind.parent.timestamp(from: payload), .distantPast)
         XCTAssertNil(EntityKind.parent.childID(from: payload))
         XCTAssertEqual(EntityKind.parent.imageField, "picture")
+    }
+
+    /// Every kind draws an icon: its custom glyph, or its SF Symbol for the stash kinds, which
+    /// have no glyph.
+    func testEveryKindHasAnIcon() {
+        for kind in EntityKind.allCases {
+            if kind.hasGlyph {
+                XCTAssertNotNil(UIImage(named: kind.assetName), "\(kind) has no glyph asset")
+            } else {
+                XCTAssertNotNil(UIImage(systemName: kind.systemImage), "\(kind) has no SF Symbol")
+            }
+        }
+        XCTAssertFalse(EntityKind.parent.hasGlyph)
+        XCTAssertFalse(EntityKind.stashAdjustment.hasGlyph)
     }
 
     func testKindSigns() {

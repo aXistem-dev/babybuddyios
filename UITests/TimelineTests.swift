@@ -37,6 +37,23 @@ final class TimelineTests: UITestCase {
         expect(changes.firstMatch)
     }
 
+    /// A regular server has no milk stash, so its type filter offers no stash adjustments; a server
+    /// with the stash does. It sits right after Pumping, so it's on screen when the menu opens.
+    func testStashAdjustmentFilterOnlyWithTheStash() {
+        launch(["BB_START_TAB": "timeline", "BB_NO_STASH": "1"])
+        tap(app.buttons["Filters"])
+        expect(app.navigationBars["Filters"])
+        tap(app.buttons.labeled("Type"))
+        expect(app.buttons["Pumping"])
+        XCTAssertFalse(app.buttons["Stash adjustment"].exists, "No stash UI on a server without the stash")
+
+        launch(["BB_START_TAB": "timeline"])
+        tap(app.buttons["Filters"])
+        expect(app.navigationBars["Filters"])
+        tap(app.buttons.labeled("Type"))
+        expect(app.buttons["Stash adjustment"])
+    }
+
     /// History pages back a window at a time and stops at the child's birthday rather than asking
     /// the server forever (#17). Demo mode reveals a fixed historic set the same way a pull would.
     ///

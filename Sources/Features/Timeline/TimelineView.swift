@@ -502,6 +502,12 @@ private struct TimelineFiltersView: View {
 
     private var hasActiveFilters: Bool { kindFilter != nil || dateFrom != nil || dateTo != nil }
 
+    /// The timeline's kinds, less the stash adjustment on a server without the milk stash, which
+    /// has no such records to filter to.
+    private var filterKinds: [EntityKind] {
+        EntityKind.timelineKinds.filter { $0 != .stashAdjustment || StashCapability.isSupported }
+    }
+
     /// Default seed when a date bound is first enabled: 30 days back for "from", today for "to".
     private var defaultFrom: Date {
         Calendar.current.date(byAdding: .day, value: -30, to: Calendar.current.startOfDay(for: .now)) ?? .now
@@ -513,7 +519,7 @@ private struct TimelineFiltersView: View {
                 Section("Activity Type") {
                     Picker("Type", selection: $kindFilter) {
                         Text("All Types").tag(EntityKind?.none)
-                        ForEach(EntityKind.timelineKinds) { kind in
+                        ForEach(filterKinds) { kind in
                             Text(kind.displayName).tag(EntityKind?.some(kind))
                         }
                     }
