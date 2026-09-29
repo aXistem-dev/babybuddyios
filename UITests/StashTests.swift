@@ -46,9 +46,9 @@ final class StashTests: UITestCase {
         expect(elements("label BEGINSWITH 'Pumping, ' AND label CONTAINS '240 ml'").firstMatch)
     }
 
-    /// A breast-milk bottle is taken from the stash by default. Some of it discarded, with a reason,
-    /// reopens as it was saved. A breastfeed shows no stash switch, and no "Breastfed by" picker
-    /// while Robin is the child's only parent.
+    /// A breast-milk bottle is taken from the stash by default, and then needs an amount. Some of it
+    /// discarded, with a reason, reopens as it was saved. A breastfeed shows no stash switch, and no
+    /// "Breastfed by" picker while Robin is the child's only parent.
     func testBottleFromStashWithDiscard() {
         launch()
         openEditor("Feeding")
@@ -60,13 +60,18 @@ final class StashTests: UITestCase {
         tap(app.buttons.labeled("Left Breast"))
         tap(app.buttons["Bottle"])
         expectValue(app.switches["Taken from stash"], "1")
+        // Taken from the stash, a bottle needs an amount before it can be saved.
+        expect(element(labeled: "Can\u{2019}t save yet. Enter an amount to take from the stash."))
+        XCTAssertFalse(bar.buttons["Save"].isEnabled)
         toggle(app.switches["Some was discarded"], to: "1")
 
         // The discard's amount sits below the bottle's own; both are still empty, so both read "0".
         let discarded = app.textFields.matching(identifier: "0").element(boundBy: 1)
         tap(discarded)
         discarded.typeText("10")
-        let reason = app.textFields["Spilled, left over…"]
+        // Found by its prompt or its label, whichever the OS exposes.
+        let reason = app.textFields.matching(NSPredicate(format: "placeholderValue == %@ OR label == %@",
+                                                         "Spilled, left over…", "Reason (optional)")).firstMatch
         tap(reason)
         reason.typeText("Spilled")
         let amount = app.textFields["0"]
