@@ -232,6 +232,10 @@ struct EntityEditorView: View {
             .onChange(of: amount) { old, new in
                 if storedAmount == old { storedAmount = new }
             }
+            // The amount stored or taken sits under "More": open it when that's what blocks Save.
+            .onChange(of: problem) { _, new in
+                if new == .storedAmountInvalid || new == .stashTakenInvalid { showsStashDetails = true }
+            }
         if !isLinkedStashEntry {
             sectioned("Tags") { tagsCard }
             if showsNotes { sectioned("Notes") { notesCard } }
@@ -881,10 +885,16 @@ struct EntityEditorView: View {
     /// The form's current contents, handed to ``ActivityDraft`` so the Baby Buddy rules the client
     /// can check offline live in one testable place instead of a boolean inside the view.
     private var draft: ActivityDraft {
-        ActivityDraft(kind: kind, start: start, end: end, time: time, date: date,
-                      amount: amount, value: value, dosage: dosage,
-                      noteText: noteText, medName: medName,
-                      parentID: parentID, requiresParent: StashCapability.isSupported)
+        let capable = StashCapability.isSupported
+        return ActivityDraft(kind: kind, start: start, end: end, time: time, date: date,
+                             amount: amount, value: value, dosage: dosage,
+                             noteText: noteText, medName: medName,
+                             parentID: parentID, requiresParent: capable, hasParents: !parentChoices.isEmpty,
+                             storesInStash: capable && toStash,
+                             takesFromStash: capable && fromStash
+                                 && Self.isStashBottle(type: feedingType, method: feedingMethod),
+                             stashAmount: storedAmount, discardsSome: discardsSome,
+                             discardedAmount: discardedAmount)
     }
 
     private var problem: ActivityProblem? { draft.problem }
@@ -1011,10 +1021,13 @@ struct EntityEditorView: View {
 
     private func populate() {
         // A new pumping on a server with the milk stash starts on the child's parent, going into
-        // the stash as the server's default says. An edit loads its own below.
-        parentID = Self.defaultParentID(forChild: childID, in: parents)
-        toStash = StashCapability.summary?.defaults.pumping_to_stash ?? true
-        fromStash = StashCapability.summary?.defaults.bottle_from_stash ?? false
+        // the stash as the server's default says, and a breast-milk bottle taken from it as the
+        // server would take it. An edit loads its own below.
+        parentID = Self.initialParentID(kind: kind, forChild: childID, in: parents)
+        let summary = StashCapability.summary
+        toStash = summary?.defaults.pumping_to_stash ?? true
+        fromStash = Self.bottleFromStashDefault(defaultOn: summary?.defaults.bottle_from_stash ?? false,
+                                                summary: summary, hasStashActivity: cachedStashActivity)
         if entity == nil, let preset = stashPreset {
             stashKind = preset.kind
             if let a = preset.amount { amount = trimmed(a) }
@@ -1208,7 +1221,8 @@ struct EntityEditorView: View {
     /// A pumping's payload. On a server with the milk stash (`capable`) it's logged on a parent:
     /// `parent`, and no `child` (the server keeps pumping on a parent at `child: null`), with
     /// `stash_amount` the stored amount, else the whole amount, or null when it was kept out of the
-    /// stash. Otherwise `base` unchanged: upstream's payload, on the child, with no stash keys.
+    /// stash or there's no amount above zero to store (the server refuses a stash amount of 0).
+    /// Otherwise `base` unchanged: upstream's payload, on the child, with no stash keys.
     /// Creating, editing and converting a timer all go through this.
     static func pumpingPayload(base: [String: Any], parentID: Int?, toStash: Bool, storedAmount: Double?,
                                amount: Double?, capable: Bool) -> [String: Any] {
@@ -1216,7 +1230,7 @@ struct EntityEditorView: View {
         var p = base
         p.removeValue(forKey: "child")
         if let parentID { p["parent"] = parentID }
-        let stashed = toStash ? (storedAmount ?? amount) : nil
+        let stashed = toStash && (amount ?? 0) > 0 ? (storedAmount ?? amount) : nil
         p["stash_amount"] = stashed.map { $0 as Any } ?? NSNull()
         return p
     }
@@ -1226,6 +1240,38 @@ struct EntityEditorView: View {
     static func defaultParentID(forChild child: Int, in entities: [LocalEntity]) -> Int? {
         let linked = EntityVisibility.parentIDs(forChild: child, in: entities)
         return linked.count == 1 ? linked.first : nil
+    }
+
+    /// The parent a new entry starts on: ``defaultParentID(forChild:in:)``, except that a new stash
+    /// entry starts on none, as on the web. Its picker only shows with several parents, where one has
+    /// to be picked; with one, the server fills it in.
+    static func initialParentID(kind: EntityKind, forChild child: Int, in entities: [LocalEntity]) -> Int? {
+        kind == .stashAdjustment ? nil : defaultParentID(forChild: child, in: entities)
+    }
+
+    /// Whether a new breast-milk bottle starts "Taken from stash". The server applies its default
+    /// (`defaultOn`) only once the stash has been used: a pumping put into it, or a stash entry. The
+    /// app asks the same of what it has: a cached summary holding milk (or below zero), or
+    /// `hasStashActivity`, a cached stash entry or stored pumping, looked up only when needed.
+    static func bottleFromStashDefault(defaultOn: Bool, summary: StashSummaryDTO?,
+                                       hasStashActivity: @autoclosure () -> Bool) -> Bool {
+        guard defaultOn else { return false }
+        if let summary, !summary.lots.isEmpty || summary.balance != 0 { return true }
+        return hasStashActivity()
+    }
+
+    /// Whether the cache shows the stash in use: any stash entry, or a pumping put into the stash.
+    private var cachedStashActivity: Bool {
+        let adjustment = EntityKind.stashAdjustment.rawValue, pumping = EntityKind.pumping.rawValue
+        var entries = FetchDescriptor<LocalEntity>(predicate: #Predicate { entity in
+            entity.kindRaw == adjustment
+        })
+        entries.fetchLimit = 1
+        if let found = try? context.fetch(entries), !found.isEmpty { return true }
+        let pumpings = (try? context.fetch(FetchDescriptor<LocalEntity>(predicate: #Predicate { entity in
+            entity.kindRaw == pumping
+        }))) ?? []
+        return pumpings.contains { ($0.payloadObject["stash_amount"] as? Double) != nil }
     }
 
     /// The methods that are a breastfeed, the only ones the server keeps a feeding's `parent` on.

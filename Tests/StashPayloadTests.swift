@@ -46,6 +46,17 @@ final class StashPayloadTests: XCTestCase {
         XCTAssertEqual(p["parent"] as? Int, 1)
     }
 
+    /// Nothing pumped (or no amount) with "Store in stash" on stores nothing: null, not a stash
+    /// amount of 0, which the server refuses.
+    func testPumpingPayloadWithoutAmountStoresNothing() {
+        let zero = EntityEditorView.pumpingPayload(base: ["amount": 0.0], parentID: 7, toStash: true,
+                                                   storedAmount: 0, amount: 0, capable: true)
+        XCTAssertTrue(zero["stash_amount"] is NSNull)
+        let none = EntityEditorView.pumpingPayload(base: [:], parentID: 7, toStash: true,
+                                                   storedAmount: 40, amount: nil, capable: true)
+        XCTAssertTrue(none["stash_amount"] is NSNull)
+    }
+
     /// The picker starts on the child's only parent, and empty when the child has none or several.
     func testDefaultParentIsTheOnlyLinkedOne() {
         let robin = parent(1, "Robin", children: [1])
@@ -56,7 +67,37 @@ final class StashPayloadTests: XCTestCase {
         XCTAssertNil(EntityEditorView.defaultParentID(forChild: 3, in: [robin, casey, sam]))
     }
 
+    /// A new stash entry starts on no parent, as on the web: with several parents one is picked,
+    /// and nothing is sent until then. Other kinds start on the child's only parent.
+    func testNewStashEntryStartsOnNoParent() {
+        let robin = parent(1, "Robin", children: [1])
+        let casey = parent(2, "Casey", children: [2])
+        let parents = [robin, casey]
+        let start = EntityEditorView.initialParentID(kind: .stashAdjustment, forChild: 1, in: parents)
+        XCTAssertNil(start)
+        XCTAssertEqual(EntityEditorView.initialParentID(kind: .pumping, forChild: 1, in: parents), 1)
+        XCTAssertNil(entry(parentID: start, parentCount: parents.count, isNew: true)["parent"])
+    }
+
     // MARK: Feeding
+
+    /// "Taken from stash" starts on only as the server would apply its default: when it's on and the
+    /// stash has been used (milk in the cached summary, a stash entry or a stored pumping).
+    func testBottleFromStashDefaultNeedsStashActivity() {
+        let empty = summary(balance: 0, lots: 0)
+        XCTAssertFalse(EntityEditorView.bottleFromStashDefault(defaultOn: false, summary: summary(balance: 60, lots: 1),
+                                                               hasStashActivity: true), "Default off")
+        XCTAssertFalse(EntityEditorView.bottleFromStashDefault(defaultOn: true, summary: empty,
+                                                               hasStashActivity: false), "No activity")
+        XCTAssertFalse(EntityEditorView.bottleFromStashDefault(defaultOn: true, summary: nil,
+                                                               hasStashActivity: false), "No summary, no activity")
+        XCTAssertTrue(EntityEditorView.bottleFromStashDefault(defaultOn: true, summary: summary(balance: 60, lots: 1),
+                                                              hasStashActivity: false), "Milk in the stash")
+        XCTAssertTrue(EntityEditorView.bottleFromStashDefault(defaultOn: true, summary: summary(balance: -20, lots: 0),
+                                                              hasStashActivity: false), "Below zero: it was used")
+        XCTAssertTrue(EntityEditorView.bottleFromStashDefault(defaultOn: true, summary: empty,
+                                                              hasStashActivity: true), "Only a stash entry cached")
+    }
 
     func testBottleFromStashWithDiscard() {
         let f = EntityEditorView.feedingStashFields(type: .breastMilk, method: .bottle, fromStash: true,
@@ -187,6 +228,18 @@ final class StashPayloadTests: XCTestCase {
     func testStashEntryReasonCappedAt255() {
         let p = entry(reason: String(repeating: "b", count: 300))
         XCTAssertEqual((p["reason"] as? String)?.unicodeScalars.count, 255)
+    }
+
+    private func summary(balance: Double, lots: Int) -> StashSummaryDTO {
+        let time = Date(timeIntervalSince1970: 1_790_000_000)
+        let lot = StashLotDTO(time: time, amount: 60, throw_away_amount: 60, age_hours: 2,
+                              warn_at: time.addingTimeInterval(48 * 3600),
+                              expires_at: time.addingTimeInterval(72 * 3600),
+                              status: .ok, is_oldest_expired: false)
+        return StashSummaryDTO(balance: balance, status: .ok, warn_age_hours: 48, max_age_hours: 72,
+                               oldest: lots > 0 ? time : nil, oldest_age_hours: lots > 0 ? 2 : nil,
+                               lots: Array(repeating: lot, count: lots),
+                               defaults: .init(pumping_to_stash: true, bottle_from_stash: true))
     }
 
     private func parent(_ id: Int, _ name: String, children: [Int]) -> LocalEntity {
