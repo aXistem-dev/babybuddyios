@@ -68,7 +68,7 @@ enum StashUse {
 enum StashNegativeWarning {
     static let dismissedKey = StashCapability.negativeWarningDismissedKey
 
-    static let message = "More milk left the stash than was ever logged going in. Fix it with an \"Added\" entry dated before the first bottle."
+    static let message = "The stash is below zero: more milk was taken out than was ever put in. Add the missing milk with an \"Added\" entry."
 
     static var isDismissed: Bool {
         get { SharedDefaults.suite.bool(forKey: dismissedKey) }
