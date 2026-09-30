@@ -63,7 +63,7 @@ final class StashTests: UITestCase {
         // Taken from the stash, a bottle needs an amount before it can be saved.
         expect(element(labeled: "Can\u{2019}t save yet. Enter an amount to take from the stash."))
         XCTAssertFalse(bar.buttons["Save"].isEnabled)
-        toggle(app.switches["Some was discarded"], to: "1")
+        toggle(app.switches["Extra milk discarded"], to: "1")
 
         // The discard's amount sits below the bottle's own; both are still empty, so both read "0".
         let discarded = app.textFields.matching(identifier: "0").element(boundBy: 1)
@@ -87,7 +87,7 @@ final class StashTests: UITestCase {
         tap(elements("label BEGINSWITH 'Feeding, ' AND label CONTAINS '75 ml'").firstMatch)
         expect(app.navigationBars["Edit Feeding"])
         expectValue(app.switches["Taken from stash"], "1")
-        expectValue(app.switches["Some was discarded"], "1")
+        expectValue(app.switches["Extra milk discarded"], "1")
         expect(app.textFields.matching(NSPredicate(format: "value == %@", "10")).firstMatch)
         expect(app.textFields.matching(NSPredicate(format: "value == %@", "Spilled")).firstMatch)
     }
@@ -160,7 +160,7 @@ final class StashTests: UITestCase {
 
         tap(app.buttons["Edit on the feeding"])
         expect(app.navigationBars["Edit Feeding"])
-        expectValue(app.switches["Some was discarded"], "1")
+        expectValue(app.switches["Extra milk discarded"], "1")
     }
 
     func testNoStashCardWithoutStash() {
@@ -234,7 +234,7 @@ final class StashTests: UITestCase {
         expectGone(app.buttons["Parent Fed"]) // the method menu has closed
         expect(app.buttons.labeled("Bottle"))
         XCTAssertFalse(app.switches["Taken from stash"].exists)
-        XCTAssertFalse(app.switches["Some was discarded"].exists)
+        XCTAssertFalse(app.switches["Extra milk discarded"].exists)
     }
 
     /// Without the milk stash the pumping editor is upstream's: no parent, no stash switch.

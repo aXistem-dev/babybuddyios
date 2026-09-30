@@ -528,15 +528,20 @@ struct EntityEditorView: View {
                     fieldLabeled("Breastfed by") { parentPicker(breastfedBy, none: "None") }
                 }
                 fieldLabeled("Amount") { amountStepper }
-                if capable, Self.isStashBottle(type: feedingType, method: feedingMethod) {
+                if capable, Self.isStashFeeding(type: feedingType, method: feedingMethod) {
                     Toggle(isOn: $fromStash) { Text("Taken from stash").font(.body) }
                         .tint(BBColor.primary)
                     if fromStash {
                         stashAmountDetails("Amount from stash")
-                        Toggle(isOn: $discardsSome) { Text("Some was discarded").font(.body) }
+                        Toggle(isOn: $discardsSome) { Text("Extra milk discarded").font(.body) }
                             .tint(BBColor.primary)
                         if discardsSome {
-                            fieldLabeled("Amount discarded") { amountField($discardedAmount) }
+                            fieldLabeled("Amount discarded") {
+                                amountField($discardedAmount)
+                                Text("On top of the amount fed.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                             fieldLabeled("Reason (optional)") {
                                 insetField(TextField("Reason (optional)", text: $discardReason,
                                                      prompt: Text("Spilled, left over…")))
@@ -892,7 +897,7 @@ struct EntityEditorView: View {
                              parentID: parentID, requiresParent: capable, hasParents: !parentChoices.isEmpty,
                              storesInStash: capable && toStash,
                              takesFromStash: capable && fromStash
-                                 && Self.isStashBottle(type: feedingType, method: feedingMethod),
+                                 && Self.isStashFeeding(type: feedingType, method: feedingMethod),
                              stashAmount: storedAmount, discardsSome: discardsSome,
                              discardedAmount: discardedAmount)
     }
@@ -1277,9 +1282,13 @@ struct EntityEditorView: View {
     /// The methods that are a breastfeed, the only ones the server keeps a feeding's `parent` on.
     private static let breastMethods: Set<FeedingMethod> = [.leftBreast, .rightBreast, .bothBreasts]
 
-    /// A feeding that can come from the milk stash: breast milk, fortified or not, from a bottle.
-    private static func isStashBottle(type: FeedingType, method: FeedingMethod) -> Bool {
-        (type == .breastMilk || type == .fortifiedBreastMilk) && method == .bottle
+    /// The methods that give expressed milk, the only ones that can come from the milk stash.
+    private static let stashMethods: Set<FeedingMethod> = [.bottle, .parentFed, .selfFed]
+
+    /// A feeding that can come from the milk stash: breast milk, fortified or not, given by bottle,
+    /// by a parent or self-fed (never a breastfeed).
+    private static func isStashFeeding(type: FeedingType, method: FeedingMethod) -> Bool {
+        (type == .breastMilk || type == .fortifiedBreastMilk) && stashMethods.contains(method)
     }
 
     /// A feeding's milk stash fields. Nothing without the milk stash (`capable`). A breast-milk bottle
@@ -1293,7 +1302,7 @@ struct EntityEditorView: View {
                                    stashAmount: Double?, discarded: Double?, discardReason: String?,
                                    capable: Bool) -> [String: Any] {
         guard capable else { return [:] }
-        let taken: Double? = fromStash && isStashBottle(type: type, method: method) ? (stashAmount ?? amount) : nil
+        let taken: Double? = fromStash && isStashFeeding(type: type, method: method) ? (stashAmount ?? amount) : nil
         guard let taken else {
             return ["stash_amount": NSNull(), "stash_discarded": NSNull(), "stash_discard_reason": ""]
         }

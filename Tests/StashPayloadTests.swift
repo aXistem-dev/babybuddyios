@@ -125,6 +125,20 @@ final class StashPayloadTests: XCTestCase {
         XCTAssertEqual(f["stash_discard_reason"] as? String, "")
     }
 
+    func testParentFedAndSelfFedComeFromTheStash() {
+        for method in [FeedingMethod.parentFed, .selfFed] {
+            let f = EntityEditorView.feedingStashFields(type: .breastMilk, method: method, fromStash: true,
+                                                        amount: 60, stashAmount: nil, discarded: 5,
+                                                        discardReason: "Spilled", capable: true)
+            XCTAssertEqual(f["stash_amount"] as? Double, 60, method.rawValue)
+            XCTAssertEqual(f["stash_discarded"] as? Double, 5, method.rawValue)
+        }
+        let breastfeed = EntityEditorView.feedingStashFields(type: .breastMilk, method: .leftBreast, fromStash: true,
+                                                             amount: 60, stashAmount: nil, discarded: 5,
+                                                             discardReason: nil, capable: true)
+        XCTAssertTrue(breastfeed["stash_amount"] is NSNull)
+    }
+
     func testNotCapableSendsNothing() {
         XCTAssertTrue(EntityEditorView.feedingStashFields(type: .breastMilk, method: .bottle, fromStash: true,
                                                           amount: 60, stashAmount: nil, discarded: 5,
