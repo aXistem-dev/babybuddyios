@@ -162,6 +162,8 @@ extension Analytics {
         /// The editor opened from sick mode: the sick card's "Log temperature", or a medicine
         /// card's button for the next dose.
         case sickMode
+        /// One tap on an event type in the Add Activity sheet, logged now without the editor.
+        case quickAdd
     }
 
     /// A completed activity record was logged (created), of any kind — e.g. a diaper change,

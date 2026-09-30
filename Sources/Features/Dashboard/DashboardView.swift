@@ -44,6 +44,10 @@ struct DashboardView: View {
     @State private var pendingConvert: ConvertRequest?
     /// The milk stash summary, on a server with the milk stash, for the stash card.
     @State private var stash = StashViewModel()
+    /// The cached event types, for the Last events card and one-tap event logging.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "eventType" }) private var eventTypeRecords: [LocalEntity]
+    /// Whether the server has events; watched so the first sync that finds them shows the card.
+    @AppStorage(EventsCapability.supportedKey, store: SharedDefaults.suite) private var eventsSupported = false
 
     // MARK: Support nudge state
     //
@@ -158,6 +162,7 @@ struct DashboardView: View {
 
                         todaySection
                         if stash.isSupported { stashCard }
+                        if eventsSupported, !eventTypes.isEmpty { lastEventsCard }
                         if !latestEvents.isEmpty { latestSection }
                     }
                 }
@@ -197,6 +202,11 @@ struct DashboardView: View {
             }) {
                 AllActivitiesSheet(
                     showsSickMode: sickModeStart == nil,
+                    eventTypes: eventsSupported ? eventTypes : [],
+                    onLogEvent: { slug in
+                        showAllActivities = false
+                        logEvent(slug)
+                    },
                     onPick: { kind in pendingAddKind = kind; showAllActivities = false },
                     onStartSickMode: {
                         sickMode.turnOn(selectedChildID, at: .now, source: .addSheet)
@@ -576,6 +586,55 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    // MARK: Events
+
+    /// The cached event types, by name.
+    private var eventTypes: [EntityEditorView.EventTypeChoice] {
+        EntityEditorView.eventTypeChoices(eventTypeRecords, keeping: nil)
+    }
+
+    /// Each event type with how long ago this child last had one, or "never".
+    private var lastEventsCard: some View {
+        let last = EventsCapability.lastTimes(in: childEntities, child: selectedChildID)
+        let types = eventTypes
+        return VStack(alignment: .leading, spacing: 9) {
+            SectionHeader("Last events")
+            BBCard(cornerRadius: BBRadius.tile, padding: 0) {
+                VStack(spacing: 0) {
+                    ForEach(Array(types.enumerated()), id: \.element.slug) { index, type in
+                        if index > 0 {
+                            Rectangle().fill(BBColor.divider).frame(height: 0.5).padding(.leading, 15)
+                        }
+                        lastEventRow(type, at: last[type.slug])
+                    }
+                }
+            }
+        }
+    }
+
+    private func lastEventRow(_ type: EntityEditorView.EventTypeChoice, at time: Date?) -> some View {
+        let when = time.map { $0.formatted(.relative(presentation: .named)) } ?? "never"
+        return HStack(spacing: 12) {
+            ActivityTile(kind: .event, size: 30, glyph: 17)
+            Text(type.name).font(.body)
+            Spacer(minLength: 8)
+            Text(when).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+        }
+        .padding(.horizontal, 15).padding(.vertical, 10)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(type.name), \(when)")
+    }
+
+    /// One tap in the Add Activity sheet: this event type, for the selected child, now. Queued like
+    /// any other record, so it works offline and can be undone from the toast.
+    private func logEvent(_ slug: String) {
+        guard let payload = EntityEditorView.eventPayloads(
+            child: selectedChildID, types: [slug], time: APIDate.isoDateTime.string(from: .now),
+            notes: "", tags: []).first else { return }
+        LocalRepository(context: context).create(kind: .event, payload: payload, source: .quickAdd)
+        Task { await sync.sync() }
     }
 
     // MARK: Milk stash
@@ -979,6 +1038,9 @@ private struct QuickAddMenu: View {
 private struct AllActivitiesSheet: View {
     @Environment(\.dismiss) private var dismiss
     var showsSickMode: Bool
+    /// The server's event types, each logged now with one tap; empty without events.
+    var eventTypes: [EntityEditorView.EventTypeChoice] = []
+    var onLogEvent: (String) -> Void = { _ in }
     var onPick: (EntityKind) -> Void
     var onStartSickMode: () -> Void
 
@@ -992,6 +1054,7 @@ private struct AllActivitiesSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     section("Log", logKinds)
                     section("Measure", measureKinds)
+                    if !eventTypes.isEmpty { eventsSection }
                     if showsSickMode { sickModeRow }
                 }
                 .padding()
@@ -1023,6 +1086,38 @@ private struct AllActivitiesSheet: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    /// A tile per event type that logs it now, and "Event…" for the editor, where several can be
+    /// logged at once.
+    private var eventsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader("Events")
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(eventTypes, id: \.slug) { type in
+                    Button { onLogEvent(type.slug) } label: {
+                        tileLabel(Text(type.name))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Log \(type.name)")
+                    .accessibilityHint("Logs it now")
+                }
+                Button { onPick(.event) } label: {
+                    tileLabel(Text("Event\u{2026}"))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Event\u{2026}")
+                .accessibilityHint("Choose one or more events to log")
+            }
+        }
+    }
+
+    private func tileLabel(_ title: Text) -> some View {
+        VStack(spacing: 7) {
+            ActivityTile(kind: .event, size: 56, glyph: 27)
+            title.font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func section(_ title: String, _ kinds: [EntityKind]) -> some View {
