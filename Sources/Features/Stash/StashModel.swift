@@ -63,26 +63,25 @@ enum StashUse {
 }
 
 /// The warning shown while the stash balance is below zero: more milk was logged leaving the stash
-/// than going in, usually because the milk that was in it before the app was used was never added.
-/// Dismissing it is remembered in the App Group's defaults until sign-out; Settings turns it back on.
+/// than going in, usually because milk that went into the fridge was never logged.
+/// Dismissing it hides it for the current dip only: the App Group's defaults keep a token of that
+/// dip, which ``StashCapability`` forgets once the balance is back at or above zero.
 enum StashNegativeWarning {
     static let dismissedKey = StashCapability.negativeWarningDismissedKey
 
     static let message = "The stash is below zero: more milk was taken out than was ever put in. Add the missing milk with an \"Added\" entry."
 
-    static var isDismissed: Bool {
-        get { SharedDefaults.suite.bool(forKey: dismissedKey) }
-        set { SharedDefaults.suite.set(newValue, forKey: dismissedKey) }
+    /// Identifies the current dip below zero; nil while the balance isn't below zero (or there is
+    /// no summary yet). A server that doesn't say when the dip started gets one fixed token.
+    static func token(for summary: StashSummaryDTO?) -> String? {
+        guard let summary, summary.balance < 0 else { return nil }
+        guard let since = summary.negative_since else { return "negative" }
+        return String(Int(since.timeIntervalSince1970))
     }
 
-    /// Whether the banner shows for `balance` (nil: no summary yet).
-    static func shows(balance: Double?, dismissed: Bool) -> Bool {
-        guard let balance else { return false }
-        return balance < 0 && !dismissed
-    }
-
-    static func shows(balance: Double?) -> Bool {
-        shows(balance: balance, dismissed: isDismissed)
+    static func shows(summary: StashSummaryDTO?, dismissedToken: String?) -> Bool {
+        guard let token = token(for: summary) else { return false }
+        return token != dismissedToken
     }
 }
 

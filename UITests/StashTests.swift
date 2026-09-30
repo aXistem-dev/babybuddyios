@@ -163,20 +163,12 @@ final class StashTests: UITestCase {
         expectValue(app.switches["Some was discarded"], "1")
     }
 
-    /// Settings turns the stash's below-zero warning back on after it was dismissed; the row is
-    /// only there with the milk stash.
-    func testBelowZeroWarningSetting() {
-        launch(["BB_START_TAB": "settings"])
-        expectValue(app.switches["Below-zero stash warning"], "1")
-    }
-
     func testNoStashCardWithoutStash() {
         launch(["BB_NO_STASH": "1"])
         expect(app.buttons["Add"])
         XCTAssertFalse(app.buttons.labeled("Milk stash").exists)
         tap(app.tabBars.buttons["Settings"])
         expect(app.navigationBars["Settings"])
-        XCTAssertFalse(app.switches["Below-zero stash warning"].exists)
         XCTAssertFalse(app.switches["Milk age alerts"].exists)
     }
 

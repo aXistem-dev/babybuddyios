@@ -60,14 +60,15 @@ final class SignOutWipeTests: XCTestCase {
             balance: 50, status: .ok, warn_age_hours: 48, max_age_hours: 72,
             oldest: nil, oldest_age_hours: nil, lots: [],
             defaults: .init(pumping_to_stash: true, bottle_from_stash: true)))
-        StashNegativeWarning.isDismissed = true
+        SharedDefaults.suite.set("1800000000", forKey: StashNegativeWarning.dismissedKey)
         XCTAssertTrue(StashCapability.isSupported)
 
         AppSession(context: context).signOut()
 
         XCTAssertFalse(StashCapability.isSupported)
         XCTAssertNil(StashCapability.summary)
-        XCTAssertFalse(StashNegativeWarning.isDismissed, "The next server shows its own warning")
+        XCTAssertNil(SharedDefaults.suite.string(forKey: StashNegativeWarning.dismissedKey),
+                     "The next server shows its own warning")
     }
 
     /// The same server typed with a trailing slash or different casing must *not* count as a
