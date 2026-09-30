@@ -244,14 +244,37 @@ enum DemoData {
             StashCapability.update(rootJSON: Data(#"{"children":"x","pumping":"x"}"#.utf8))
             return
         }
-        StashCapability.update(rootJSON: Data(#"{"parents":"x","stash-adjustments":"x","stash":"x"}"#.utf8))
+        StashCapability.update(rootJSON: Data(
+            #"{"parents":"x","stash-adjustments":"x","stash":"x","stash/settings":"x"}"#.utf8))
+        StashCapability.store(settings: demoStashSettings)
         let kinds = [EntityKind.pumping, .feeding, .stashAdjustment].map(\.rawValue)
         let pendingDelete = SyncState.pendingDelete.rawValue
         let descriptor = FetchDescriptor<LocalEntity>(predicate: #Predicate { entity in
             kinds.contains(entity.kindRaw) && entity.syncStateRaw != pendingDelete
         })
         let entities = (try? context.fetch(descriptor)) ?? []
-        StashCapability.store(summary: demoStashSummary(entities: entities, now: Date()))
+        StashCapability.store(summary: demoStashSummary(entities: entities, now: Date(),
+                                                        settings: demoStashSettings))
+    }
+
+    /// Demo mode's stash settings (`GET /api/stash/settings`), changed in memory by
+    /// ``patchDemoStashSettings(_:)``. Editable, unless `BB_STASH_SETTINGS_READONLY=1` makes this
+    /// user one who may only see them.
+    @MainActor
+    static var demoStashSettings = StashSettingsDTO(
+        pumping_to_stash: true, bottle_from_stash: true, warn_age_hours: 48, max_age_hours: 72,
+        can_edit: ProcessInfo.processInfo.environment["BB_STASH_SETTINGS_READONLY"] != "1")
+
+    /// Demo mode's `PATCH /api/stash/settings`: applies the fields in `body` and returns the result.
+    @MainActor
+    static func patchDemoStashSettings(_ body: [String: Any]) -> StashSettingsDTO {
+        var s = demoStashSettings
+        if let v = body["pumping_to_stash"] as? Bool { s.pumping_to_stash = v }
+        if let v = body["bottle_from_stash"] as? Bool { s.bottle_from_stash = v }
+        if let v = body["warn_age_hours"] as? Int { s.warn_age_hours = v }
+        if let v = body["max_age_hours"] as? Int { s.max_age_hours = v }
+        demoStashSettings = s
+        return s
     }
 
     /// The stash summary a server with the milk stash would return for `entities`, for demo mode,
@@ -265,8 +288,10 @@ enum DemoData {
     /// - lots under 0.01 ml are dropped;
     /// - a lot is `warn` from 48 h and `expired` from 72 h old. `amount` is rounded to 2 decimals,
     ///   `throw_away_amount` is not, and `is_oldest_expired` marks only the first expired lot.
-    static func demoStashSummary(entities: [LocalEntity], now: Date) -> StashSummaryDTO {
-        let warnHours = 48.0, maxHours = 72.0, epsilon = 1e-9
+    static func demoStashSummary(entities: [LocalEntity], now: Date,
+                                 settings: StashSettingsDTO? = nil) -> StashSummaryDTO {
+        let warnHours = Double(settings?.warn_age_hours ?? 48), maxHours = Double(settings?.max_age_hours ?? 72)
+        let epsilon = 1e-9
         func date(_ value: Any?) -> Date? { (value as? String).flatMap(APIDate.parse) }
 
         var events: [(time: Date, amount: Double, parent: Int?)] = []
@@ -347,7 +372,8 @@ enum DemoData {
             balance: (balance * 100).rounded() / 100, status: status,
             warn_age_hours: warnHours, max_age_hours: maxHours,
             oldest: lotDTOs.first?.time, oldest_age_hours: lotDTOs.first?.age_hours,
-            lots: lotDTOs, defaults: .init(pumping_to_stash: true, bottle_from_stash: true))
+            lots: lotDTOs, defaults: .init(pumping_to_stash: settings?.pumping_to_stash ?? true,
+                                           bottle_from_stash: settings?.bottle_from_stash ?? true))
     }
 
     /// `BB_SEED_SECOND_CHILD=1`: a second child with no records of her own, so the Editor's Baby

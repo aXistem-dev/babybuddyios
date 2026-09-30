@@ -315,6 +315,20 @@ struct StashLotDTO: Codable, Equatable {
     var parent: Int? = nil
 }
 
+/// The milk stash's server settings (`GET`/`PATCH /api/stash/settings`), on a server that has
+/// them. `can_edit` is the server's decision, never worked out by the app; it's read-only.
+struct StashSettingsDTO: Codable, Equatable {
+    /// Whether new pumping starts "Store in stash".
+    var pumping_to_stash: Bool
+    /// Whether new breast-milk bottles start "Taken from stash", once the stash is in use.
+    var bottle_from_stash: Bool
+    /// Hours after which milk is marked to use first; always below `max_age_hours`.
+    var warn_age_hours: Int
+    /// Hours after which milk is marked to throw away.
+    var max_age_hours: Int
+    var can_edit: Bool
+}
+
 /// The server's milk stash summary (`GET /api/stash`). The server is authoritative: it runs FIFO
 /// over the whole history, which the app only syncs a recent window of.
 struct StashSummaryDTO: Codable, Equatable {
