@@ -214,8 +214,10 @@ enum DemoData {
     /// which has none. Mirrors the server's FIFO:
     /// - events oldest first, milk in before milk out at the same time: pumping `stash_amount` at
     ///   its end, a bottle's `stash_amount` at its start, an adjustment's signed amount at its time;
-    /// - every outflow uses the oldest milk first, and milk taken from an empty stash is a
-    ///   shortfall the next inflow repays;
+    /// - a lot is one inflow, and is the parent's of its pumping or "added" entry;
+    /// - every outflow uses the oldest milk first. A discard with a parent takes that parent's
+    ///   oldest milk first, and only then anyone's; bottles have no parent. Milk taken from an empty
+    ///   stash is a shortfall the next inflow repays;
     /// - lots under 0.01 ml are dropped;
     /// - a lot is `warn` from 48 h and `expired` from 72 h old. `amount` is rounded to 2 decimals,
     ///   `throw_away_amount` is not, and `is_oldest_expired` marks only the first expired lot.
@@ -223,25 +225,26 @@ enum DemoData {
         let warnHours = 48.0, maxHours = 72.0, epsilon = 1e-9
         func date(_ value: Any?) -> Date? { (value as? String).flatMap(APIDate.parse) }
 
-        var events: [(time: Date, amount: Double)] = []
+        var events: [(time: Date, amount: Double, parent: Int?)] = []
         for entity in entities {
             let p = entity.payloadObject
+            let parent = p["parent"] as? Int
             switch entity.kind {
             case .pumping:
                 if let stashed = p["stash_amount"] as? Double, let end = date(p["end"]) {
-                    events.append((end, stashed))
+                    events.append((end, stashed, parent))
                 }
             case .feeding:
                 if let taken = p["stash_amount"] as? Double, let start = date(p["start"]) {
-                    events.append((start, -taken))
+                    events.append((start, -taken, nil))
                 }
             case .stashAdjustment:
                 guard let time = date(p["time"]) else { continue }
                 if let signed = p["signed_amount"] as? Double {
-                    events.append((time, signed))
+                    events.append((time, signed, parent))
                 } else if let amount = p["amount"] as? Double,
                           let kind = (p["kind"] as? String).flatMap(StashKind.init(rawValue:)) {
-                    events.append((time, kind.sign * amount))
+                    events.append((time, kind.sign * amount, parent))
                 }
             default:
                 continue
@@ -252,24 +255,30 @@ enum DemoData {
             return a.amount >= 0 && b.amount < 0 // milk in before milk out at the same time
         }
 
-        var lots: [(time: Date, amount: Double)] = []
+        var lots: [(time: Date, amount: Double, parent: Int?)] = []
+        /// Takes `need` ml from the oldest lots, only `parent`'s when given; returns what's left.
+        func takeOldest(_ need: Double, parent: Int? = nil) -> Double {
+            var need = need
+            for index in lots.indices where need > epsilon {
+                if let parent, lots[index].parent != parent { continue }
+                let used = min(lots[index].amount, need)
+                lots[index].amount -= used
+                need -= used
+            }
+            lots.removeAll { $0.amount <= epsilon }
+            return need
+        }
         var shortfall = 0.0
         for event in events {
             if event.amount > 0 {
                 let amount = event.amount - shortfall
                 shortfall = max(-amount, 0)
-                if amount > epsilon { lots.append((event.time, amount)) }
+                if amount > epsilon { lots.append((event.time, amount, event.parent)) }
                 continue
             }
             var need = -event.amount
-            while need > epsilon, !lots.isEmpty {
-                if lots[0].amount <= need + epsilon {
-                    need -= lots.removeFirst().amount
-                } else {
-                    lots[0].amount -= need
-                    need = 0
-                }
-            }
+            if let parent = event.parent { need = takeOldest(need, parent: parent) }
+            need = takeOldest(need)
             if need > epsilon { shortfall += need }
         }
         lots.removeAll { $0.amount < 0.01 }
@@ -284,7 +293,7 @@ enum DemoData {
                 age_hours: (age * 10).rounded() / 10,
                 warn_at: lot.time.addingTimeInterval(warnHours * 3600),
                 expires_at: lot.time.addingTimeInterval(maxHours * 3600),
-                status: status, is_oldest_expired: status == .expired && !seenExpired))
+                status: status, is_oldest_expired: status == .expired && !seenExpired, parent: lot.parent))
             if status == .expired { seenExpired = true }
         }
         let status: StashStatus = lotDTOs.contains(where: { $0.status == .expired }) ? .expired

@@ -7,12 +7,33 @@ final class StashThrowAwayTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
     private func lot(_ amount: Double, _ status: StashStatus, hoursAgo: Double, throwAway: Double? = nil,
-                     oldestExpired: Bool? = nil) -> StashLotDTO {
+                     oldestExpired: Bool? = nil, parent: Int? = nil) -> StashLotDTO {
         let time = now.addingTimeInterval(-hoursAgo * 3600)
         return StashLotDTO(time: time, amount: amount, throw_away_amount: throwAway, age_hours: hoursAgo,
                            warn_at: time.addingTimeInterval(48 * 3600),
                            expires_at: time.addingTimeInterval(72 * 3600),
-                           status: status, is_oldest_expired: oldestExpired)
+                           status: status, is_oldest_expired: oldestExpired, parent: parent)
+    }
+
+    /// "Throw away" on a lot discards its unrounded amount, rounded down, from the lot's parent, and
+    /// pins it; "Throw away all expired milk" pins no parent at all.
+    func testThrowAwayPresets() {
+        let one = StashEntryPreset.throwAway(lot: lot(20, .expired, hoursAgo: 90, throwAway: 19.996, parent: 3),
+                                             maxAgeHours: 72)
+        XCTAssertEqual(one.kind, .discarded)
+        XCTAssertEqual(one.amount ?? 0, 19.99, accuracy: 1e-9)
+        XCTAssertEqual(one.reason, "Older than 72 h")
+        XCTAssertEqual(one.parent, 3)
+        XCTAssertTrue(one.pinsParent)
+
+        let nobodys = StashEntryPreset.throwAway(lot: lot(20, .expired, hoursAgo: 90), maxAgeHours: 72)
+        XCTAssertNil(nobodys.parent)
+        XCTAssertEqual(nobodys.amount ?? 0, 20, accuracy: 1e-9)
+
+        let all = StashEntryPreset.throwAway(30.5, maxAgeHours: 72)
+        XCTAssertNil(all.parent)
+        XCTAssertTrue(all.pinsParent)
+        XCTAssertFalse(StashEntryPreset(kind: .discarded).pinsParent, "Discard milk picks as usual")
     }
 
     private func summary(_ lots: [StashLotDTO]) -> StashSummaryDTO {

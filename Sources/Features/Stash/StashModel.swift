@@ -92,11 +92,26 @@ struct StashEntryPreset: Identifiable {
     var kind: StashKind
     var amount: Double?
     var reason = ""
+    /// Whose milk the entry starts on.
+    var parent: Int?
+    /// Whether `parent` is sent as is, none included, even where the picker is hidden: throwing
+    /// milk away must not let the server fill in the only milk parent, whose milk a discard would
+    /// then take first.
+    var pinsParent = false
 
-    /// Throwing milk away: discarded, the amount rounded down, and why.
+    /// Throwing all expired milk away: discarded, the amount rounded down, and why, from no parent
+    /// in particular, so the oldest milk of anyone goes first.
     static func throwAway(_ amount: Double, maxAgeHours: Double) -> StashEntryPreset {
         StashEntryPreset(kind: .discarded, amount: StashThrowAway.amount(amount),
-                         reason: StashThrowAway.reason(maxAgeHours: maxAgeHours))
+                         reason: StashThrowAway.reason(maxAgeHours: maxAgeHours), pinsParent: true)
+    }
+
+    /// Throwing one lot away: its unrounded amount rounded down, from the lot's parent, whose
+    /// oldest milk that lot is.
+    static func throwAway(lot: StashLotDTO, maxAgeHours: Double) -> StashEntryPreset {
+        StashEntryPreset(kind: .discarded, amount: StashThrowAway.amount(lot.throw_away_amount ?? lot.amount),
+                         reason: StashThrowAway.reason(maxAgeHours: maxAgeHours),
+                         parent: lot.parent, pinsParent: true)
     }
 }
 

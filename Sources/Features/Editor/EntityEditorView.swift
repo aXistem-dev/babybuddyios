@@ -470,7 +470,15 @@ struct EntityEditorView: View {
                         insetField(TextField("Reason (optional)", text: $stashReason))
                     }
                     if parentChoices.count >= 2 {
-                        fieldLabeled("Whose milk") { parentPicker(parentChoices, none: "None") }
+                        fieldLabeled("Whose milk") {
+                            parentPicker(parentChoices, none: "None")
+                            if stashKind == .discarded {
+                                Text("A discard takes this parent's oldest milk first. None: the oldest milk of anyone.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                     }
                 }
             }
@@ -1046,6 +1054,9 @@ struct EntityEditorView: View {
             stashKind = preset.kind
             if let a = preset.amount { amount = trimmed(a) }
             stashReason = preset.reason
+            // A lot's parent only when they can still be picked: the server refuses a parent who
+            // no longer produces milk, so their lot goes as nobody's, oldest first, which it is.
+            parentID = preset.parent.flatMap { parent in parentChoices.contains { $0.id == parent } ? parent : nil }
         }
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
@@ -1223,6 +1234,7 @@ struct EntityEditorView: View {
             p = Self.stashEntryPayload(kind: stashKind, amount: ActivityDraft.number(amount), time: iso(time),
                                        reason: stashReason, parentID: parentID,
                                        parentCount: parentChoices.count, isNew: entity == nil,
+                                       pinsParent: stashPreset?.pinsParent ?? false,
                                        notes: notes, tags: tagList)
         case .timer, .child, .parent:
             break
@@ -1334,11 +1346,13 @@ struct EntityEditorView: View {
 
     /// A stash entry's payload: kind, amount, time, reason, notes and tags, and never a `child` (the
     /// stash belongs to the parents) nor the server's computed `signed_amount` or bottle link.
-    /// `parent` only when there are several parents (`parentCount`) to tell apart: the pick, else
-    /// nothing on a new entry and a cleared parent on an edit. With one parent or none the key is
-    /// left out, so the server fills in the only parent on a new entry and keeps an edit's own.
+    /// `parent` only when there are several parents who produce milk (`parentCount`) to tell apart:
+    /// the pick, else nothing on a new entry and a cleared parent on an edit. With one or none the
+    /// key is left out, so the server fills in the only parent who produces milk on a new entry and
+    /// keeps an edit's own. A new entry that pins its parent (throwing milk away, see
+    /// ``StashEntryPreset``) always sends it, or null for none.
     static func stashEntryPayload(kind: StashKind, amount: Double?, time: String, reason: String,
-                                  parentID: Int?, parentCount: Int, isNew: Bool,
+                                  parentID: Int?, parentCount: Int, isNew: Bool, pinsParent: Bool = false,
                                   notes: String, tags: [String]) -> [String: Any] {
         var p: [String: Any] = ["time": time, "kind": kind.rawValue, "reason": cappedReason(reason),
                                 "notes": notes, "tags": tags]
@@ -1346,9 +1360,11 @@ struct EntityEditorView: View {
         if parentCount >= 2 {
             if let parentID {
                 p["parent"] = parentID
-            } else if !isNew {
+            } else if !isNew || pinsParent {
                 p["parent"] = NSNull()
             }
+        } else if isNew, pinsParent {
+            p["parent"] = parentID.map { $0 as Any } ?? NSNull()
         }
         return p
     }

@@ -218,10 +218,23 @@ final class StashPayloadTests: XCTestCase {
     // MARK: Stash entries
 
     private func entry(kind: StashKind = .discarded, amount: Double? = 20, reason: String = " Spilled ",
-                       parentID: Int? = nil, parentCount: Int = 1, isNew: Bool = true) -> [String: Any] {
+                       parentID: Int? = nil, parentCount: Int = 1, isNew: Bool = true,
+                       pinsParent: Bool = false) -> [String: Any] {
         EntityEditorView.stashEntryPayload(kind: kind, amount: amount, time: "2026-06-15T08:00:00Z",
                                            reason: reason, parentID: parentID, parentCount: parentCount,
-                                           isNew: isNew, notes: "", tags: ["night"])
+                                           isNew: isNew, pinsParent: pinsParent, notes: "", tags: ["night"])
+    }
+
+    /// Throwing milk away pins its parent on a new entry, even with the picker hidden: the lot's
+    /// parent, or null so the server doesn't fill in the only milk parent, whose milk would go first.
+    func testThrowAwayPinsItsParent() {
+        XCTAssertEqual(entry(parentID: 1, parentCount: 1, pinsParent: true)["parent"] as? Int, 1)
+        XCTAssertTrue(entry(parentID: nil, parentCount: 1, pinsParent: true)["parent"] is NSNull)
+        XCTAssertTrue(entry(parentID: nil, parentCount: 0, pinsParent: true)["parent"] is NSNull)
+        XCTAssertTrue(entry(parentID: nil, parentCount: 2, pinsParent: true)["parent"] is NSNull)
+        XCTAssertEqual(entry(parentID: 2, parentCount: 2, pinsParent: true)["parent"] as? Int, 2)
+        // An edit is never a throw-away: with one parent the server keeps its own.
+        XCTAssertNil(entry(parentID: nil, parentCount: 1, isNew: false, pinsParent: true)["parent"])
     }
 
     /// A stash entry belongs to the stash, not a child: never a `child` key, and never the server's

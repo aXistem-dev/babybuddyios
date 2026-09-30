@@ -24,8 +24,8 @@ final class DemoStashSummaryTests: XCTestCase {
                            timestamp: kind.timestamp(from: payload), payload: data, syncState: .synced)
     }
 
-    private func pumping(_ hoursAgo: Double, stash: Double) -> LocalEntity {
-        entity(.pumping, ["child": NSNull(), "parent": 1, "start": iso(hoursAgo + 0.3), "end": iso(hoursAgo),
+    private func pumping(_ hoursAgo: Double, stash: Double, parent: Int = 1) -> LocalEntity {
+        entity(.pumping, ["child": NSNull(), "parent": parent, "start": iso(hoursAgo + 0.3), "end": iso(hoursAgo),
                           "amount": stash, "stash_amount": stash])
     }
 
@@ -34,9 +34,38 @@ final class DemoStashSummaryTests: XCTestCase {
                           "type": "breast milk", "method": "bottle", "amount": stash, "stash_amount": stash])
     }
 
-    private func adjustment(_ hoursAgo: Double, _ kind: StashKind, _ amount: Double) -> LocalEntity {
+    private func adjustment(_ hoursAgo: Double, _ kind: StashKind, _ amount: Double,
+                            parent: Int? = nil) -> LocalEntity {
         entity(.stashAdjustment, ["time": iso(hoursAgo), "amount": amount, "kind": kind.rawValue,
-                                  "reason": "", "signed_amount": kind.sign * amount])
+                                  "reason": "", "signed_amount": kind.sign * amount,
+                                  "parent": parent.map { $0 as Any } ?? NSNull()])
+    }
+
+    /// A discard with a parent takes that parent's oldest milk first, then anyone's; one without, and
+    /// a bottle, the oldest milk of anyone. Lots are their pumping's or "added" entry's parent's, and
+    /// milk taken beyond the stash is a shortfall the next inflow repays, as on the server.
+    func testPerParentDiscards() {
+        let s = DemoData.demoStashSummary(entities: [
+            pumping(80, stash: 100, parent: 1), pumping(70, stash: 100, parent: 2),
+            adjustment(60, .added, 50, parent: 2), pumping(50, stash: 100, parent: 1),
+            adjustment(40, .discarded, 120, parent: 2), // 2's 100 ml at 70 h, then 20 ml of 2's added milk
+            adjustment(30, .discarded, 50),             // nobody's: the oldest, 1's at 80 h
+            bottle(20, stash: 30),                      // a bottle: 1's at 80 h again
+        ], now: now)
+        XCTAssertEqual(s.lots.map(\.amount), [20, 30, 100])
+        XCTAssertEqual(s.lots.map(\.parent), [1, 2, 1])
+        XCTAssertEqual(s.lots.map(\.age_hours), [80, 60, 50])
+        XCTAssertEqual(s.balance, 150)
+
+        // More than the parent has: their milk, then the oldest of anyone's, then a shortfall that
+        // the next inflow repays before it becomes a lot.
+        let short = DemoData.demoStashSummary(entities: [
+            pumping(80, stash: 40, parent: 1), pumping(70, stash: 30, parent: 2),
+            adjustment(60, .discarded, 100, parent: 2), pumping(50, stash: 50, parent: 2),
+        ], now: now)
+        XCTAssertEqual(short.lots.map(\.amount), [20])
+        XCTAssertEqual(short.lots.map(\.parent), [2])
+        XCTAssertEqual(short.balance, 20)
     }
 
     /// Outflows use the oldest milk first, a linked discard included, and each lot gets its

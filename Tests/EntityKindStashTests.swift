@@ -49,10 +49,14 @@ final class EntityKindStashTests: XCTestCase {
          "lots": [{"time": "2026-09-25T08:00:00+02:00", "amount": 120.0,
                    "throw_away_amount": 119.996, "age_hours": 50.0,
                    "warn_at": "2026-09-27T08:00:00+02:00", "expires_at": "2026-09-28T08:00:00+02:00",
-                   "status": "warn", "is_oldest_expired": false}],
+                   "status": "warn", "is_oldest_expired": false, "parent": 3},
+                  {"time": "2026-09-26T08:00:00+02:00", "amount": 10.0, "age_hours": 26.0,
+                   "warn_at": "2026-09-28T08:00:00+02:00", "expires_at": "2026-09-29T08:00:00+02:00",
+                   "status": "ok"}],
          "defaults": {"pumping_to_stash": true, "bottle_from_stash": false}}
         """.data(using: .utf8)!
         let s = try APICoders.decoder.decode(StashSummaryDTO.self, from: json)
+        XCTAssertEqual(s.lots.map(\.parent), [3, nil], "Whose milk a lot is; none, or a server without it")
         XCTAssertEqual(s.lots.first?.status, .warn)
         XCTAssertEqual(s.lots.first?.throw_away_amount, 119.996)
         XCTAssertEqual(s.lots.first?.is_oldest_expired, false)
