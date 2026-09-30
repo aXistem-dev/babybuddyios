@@ -22,6 +22,11 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     case parent
     /// A manual milk-stash change: milk added from elsewhere, or discarded.
     case stashAdjustment
+    /// A user-defined event type ("Bath", "Nail trim"). Only on servers with events; see
+    /// `EventsCapability`. Types are data from the server: the app never names any.
+    case eventType
+    /// Something that happened to a child at a time, of one ``eventType``, referenced by its slug.
+    case event
 
     var id: String { rawValue }
 
@@ -44,6 +49,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .medication: return "medication"
         case .parent: return "parents"
         case .stashAdjustment: return "stash-adjustments"
+        case .eventType: return "event-types"
+        case .event: return "events"
         }
     }
 
@@ -52,12 +59,14 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     var timeField: String {
         switch self {
         case .feeding, .sleep, .tummyTime, .pumping, .timer: return "start"
-        case .change, .note, .temperature, .medication, .stashAdjustment: return "time"
+        case .change, .note, .temperature, .medication, .stashAdjustment, .event: return "time"
         case .weight, .height, .headCircumference, .bmi: return "date"
         case .child: return "birth_date"
         // Parents have no timestamp: `timestamp(from:)` falls back to `.distantPast`, and
         // ordering by name keeps the list request valid.
         case .parent: return "first_name"
+        // Event types have no timestamp either; ordering by name keeps the list request valid.
+        case .eventType: return "name"
         }
     }
 
@@ -67,11 +76,13 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     /// (`filterset_fields = ("child", "date")` — exact match only), so all four are always
     /// pulled in full. The remaining high-volume event kinds are windowed. Parents and stash
     /// adjustments are low-volume and have no range filter either, so they are pulled in full too.
+    /// Events are windowed like notes (`date_min`/`date_max` on `time`); their types are metadata.
     var isWindowed: Bool {
         switch self {
-        case .feeding, .change, .sleep, .tummyTime, .pumping, .note, .temperature, .medication:
+        case .feeding, .change, .sleep, .tummyTime, .pumping, .note, .temperature, .medication, .event:
             return true
-        case .child, .timer, .weight, .height, .headCircumference, .bmi, .parent, .stashAdjustment:
+        case .child, .timer, .weight, .height, .headCircumference, .bmi, .parent, .stashAdjustment,
+             .eventType:
             return false
         }
     }
@@ -104,6 +115,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .medication: return "Medication"
         case .parent: return "Parent"
         case .stashAdjustment: return "Stash adjustment"
+        case .eventType: return "Event type"
+        case .event: return "Event"
         }
     }
 
@@ -125,6 +138,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .medication: return "pills.fill"
         case .parent: return "person.2"
         case .stashAdjustment: return "drop.halffull"
+        case .eventType: return "tag"
+        case .event: return "checkmark.circle"
         }
     }
 
@@ -139,9 +154,10 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// Kinds shown in the merged activity timeline (excludes Child and Parent, which are metadata).
+    /// Kinds shown in the merged activity timeline (excludes Child, Parent and Event type, which are
+    /// metadata).
     static var timelineKinds: [EntityKind] {
-        [.feeding, .change, .sleep, .tummyTime, .pumping, .stashAdjustment, .note, .temperature,
+        [.feeding, .change, .sleep, .tummyTime, .pumping, .stashAdjustment, .event, .note, .temperature,
          .medication, .weight, .height, .headCircumference, .bmi]
     }
 

@@ -80,7 +80,20 @@ actor SyncActor {
             return Self.fail(serverError, endpoint: "all", changed: changed)
         }
         if await refreshStash(client: client) { changed = true }
+        if refreshEventTypeNames() { changed = true }
         return PullOutcome(error: nil, changed: changed)
+    }
+
+    /// Cache the pulled event types' names by slug, for the rows that name an event (see
+    /// ``EventsCapability``). Returns whether they changed, so a rename shows without new events.
+    private func refreshEventTypeNames() -> Bool {
+        let before = EventsCapability.typeNames
+        guard EventsCapability.isSupported else { return false }
+        let kind = EntityKind.eventType.rawValue
+        let types = (try? modelContext.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        EventsCapability.store(typesIn: types)
+        return EventsCapability.typeNames != before
     }
 
     /// Refresh whether the server has the milk stash (its API root lists the stash routes) and, if
@@ -90,10 +103,13 @@ actor SyncActor {
     /// (the stash card, the milk age alerts) refreshes.
     private func refreshStash(client: APIClient) async -> Bool {
         let wasSupported = StashCapability.isSupported
+        let hadEvents = EventsCapability.isSupported
         let previous = StashCapability.summary
         do {
             let root = try await client.getRawPath("")
             StashCapability.update(rootJSON: root)
+            // The same root says whether the server has events.
+            EventsCapability.update(rootJSON: root)
             if StashCapability.isSupported {
                 let data = try await client.getRawPath("stash")
                 do {
@@ -110,7 +126,7 @@ actor SyncActor {
         } catch {
             Analytics.error(network: "pull-stash")
         }
-        return StashCapability.isSupported != wasSupported
+        return StashCapability.isSupported != wasSupported || EventsCapability.isSupported != hadEvents
             || Self.stashSummaryChanged(from: previous, to: StashCapability.summary)
     }
 

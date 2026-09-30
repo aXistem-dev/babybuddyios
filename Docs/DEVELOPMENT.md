@@ -82,6 +82,8 @@ Pass these via `SIMCTL_CHILD_<NAME>` environment variables to `xcrun simctl laun
 | `BB_DOSE_ALERT_SECONDS=<n>` | Turn medication reminders on and shorten every next-dose interval to `n` seconds (the editor's shortest is 4 h) |
 | `BB_STASH_ALERT_SECONDS=<n>` | Turn milk age alerts on and fire each stash lot's "use it first" `n` seconds after the first reconcile that computes the alerts (not after launch), its "throw it away" `3n` (on a server with the milk stash, or `BB_DEMO`) |
 | `BB_NO_STASH=1` | With `BB_DEMO`, behave like a server without the milk stash: no stash data, screen or alerts |
+| `BB_MILK_PARENTS=2` | With `BB_DEMO`, add a second parent who produces milk, so the parent pickers show and lots name their parent |
+| `BB_NO_EVENTS=1` | With `BB_DEMO`, behave like a server without events: no event types, events or event UI |
 | `BB_TOAST_SECONDS=<n>` | Hold the undo toast open for `n` seconds instead of 5 |
 
 `BB_DEMO=1` is the fastest way to see the app without standing up a server — it seeds a child,

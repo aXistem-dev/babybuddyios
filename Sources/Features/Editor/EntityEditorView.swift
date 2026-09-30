@@ -26,6 +26,8 @@ struct EntityEditorView: View {
     let source: Analytics.ActivitySource
     /// What a new stash entry starts with (its kind, and for a throw-away the amount and reason).
     let stashPreset: StashEntryPreset?
+    /// The event type (slug) a new event starts on; none, and the customer picks one or more.
+    let eventTypePreset: String?
 
     /// The record kind. Mirrored into state so the top activity selector can swap it while
     /// creating; locked to the passed-in value when editing or converting.
@@ -39,13 +41,14 @@ struct EntityEditorView: View {
 
     init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil,
          template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor,
-         stashPreset: StashEntryPreset? = nil) {
+         stashPreset: StashEntryPreset? = nil, eventTypePreset: String? = nil) {
         self.childID = childID
         self.entity = entity
         self.sourceTimer = sourceTimer
         self.template = template
         self.source = source
         self.stashPreset = stashPreset
+        self.eventTypePreset = eventTypePreset
         _kind = State(initialValue: kind)
         _selectedChildID = State(initialValue: childID)
     }
@@ -106,11 +109,16 @@ struct EntityEditorView: View {
     @State private var stashReason = ""
     /// The bottle a linked discard belongs to, opened from "Edit on the feeding".
     @State private var linkedFeeding: LocalEntity?
+    // Event, on a server with events: the chosen event types' slugs. Several while creating (one
+    // event each, at the same time); exactly one when editing.
+    @State private var eventTypes: Set<String> = []
 
     /// Every cached dose, so a dose synced in while the editor is open still raises the warning.
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" }) private var medications: [LocalEntity]
     /// The cached parents, for "Who pumped" and "Breastfed by" on a server with the milk stash.
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "parent" }) private var parents: [LocalEntity]
+    /// The cached event types, for an event's type picker on a server with events.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "eventType" }) private var eventTypeRecords: [LocalEntity]
 
     @State private var confirmingDelete = false
     /// The queued write for this record that the server refused, if any. Drives the sync banner.
@@ -362,7 +370,7 @@ struct EntityEditorView: View {
                     pickerRow("Start", selection: $start, components: [.date, .hourAndMinute])
                     rowDivider
                     endRow
-                case .change, .note, .temperature, .medication:
+                case .change, .note, .temperature, .medication, .event:
                     pickerRow("Time", selection: $time, components: [.date, .hourAndMinute])
                 case .weight, .height, .headCircumference, .bmi:
                     pickerRow("Date", selection: $date, components: .date)
@@ -373,7 +381,7 @@ struct EntityEditorView: View {
                     } else {
                         pickerRow("Time", selection: $time, components: [.date, .hourAndMinute])
                     }
-                case .timer, .child, .parent:
+                case .timer, .child, .parent, .eventType:
                     EmptyView()
                 }
             }
@@ -448,9 +456,83 @@ struct EntityEditorView: View {
             medicationDetails
         case .stashAdjustment:
             stashEntryDetails
-        case .timer, .child, .parent:
+        case .event:
+            eventDetails
+        case .timer, .child, .parent, .eventType:
             EmptyView()
         }
+    }
+
+    /// What happened: a row per cached event type. While creating, several can be ticked, and each
+    /// becomes its own event at the same time (a bath and a nail trim together); an edit has one.
+    private var eventDetails: some View {
+        let choices = eventTypeChoices
+        return BBCard(cornerRadius: BBRadius.tile, padding: 0) {
+            VStack(spacing: 0) {
+                if choices.isEmpty {
+                    Text("No event types yet. Add them in Baby Buddy.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 15).padding(.vertical, 13)
+                }
+                ForEach(Array(choices.enumerated()), id: \.element.slug) { index, type in
+                    if index > 0 { rowDivider }
+                    eventTypeRow(type)
+                }
+            }
+        }
+    }
+
+    private func eventTypeRow(_ type: EventTypeChoice) -> some View {
+        let selected = eventTypes.contains(type.slug)
+        return Button {
+            if isEditing {
+                eventTypes = [type.slug]
+            } else if selected {
+                eventTypes.remove(type.slug)
+            } else {
+                eventTypes.insert(type.slug)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Text(type.name).font(.body).foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(selected ? BBColor.event : Color.secondary.opacity(0.5))
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 15).padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// An event type on offer: its slug (what an event stores) and its name.
+    struct EventTypeChoice: Equatable {
+        let slug: String
+        let name: String
+    }
+
+    /// The cached event types by name, and an edited event's own type even if this phone hasn't
+    /// synced it (shown by its slug).
+    private var eventTypeChoices: [EventTypeChoice] {
+        Self.eventTypeChoices(eventTypeRecords, keeping: isEditing ? eventTypes.first : nil)
+    }
+
+    static func eventTypeChoices(_ records: [LocalEntity], keeping current: String?) -> [EventTypeChoice] {
+        var choices = records.compactMap { entity -> EventTypeChoice? in
+            guard entity.kind == .eventType, entity.syncState != .pendingDelete,
+                  let slug = entity.payloadObject["slug"] as? String, !slug.isEmpty else { return nil }
+            let name = entity.payloadObject["name"] as? String ?? ""
+            return EventTypeChoice(slug: slug, name: name.isEmpty ? slug : name)
+        }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        if let current, !choices.contains(where: { $0.slug == current }) {
+            choices.append(EventTypeChoice(slug: current, name: current))
+        }
+        return choices
     }
 
     /// A stash entry: milk added to the stash from elsewhere, or discarded, with an optional reason.
@@ -916,7 +998,7 @@ struct EntityEditorView: View {
                              takesFromStash: capable && fromStash
                                  && Self.isStashFeeding(type: feedingType, method: feedingMethod),
                              stashAmount: storedAmount, discardsSome: discardsSome,
-                             discardedAmount: discardedAmount)
+                             discardedAmount: discardedAmount, eventTypeCount: eventTypes.count)
     }
 
     private var problem: ActivityProblem? { draft.problem }
@@ -1050,6 +1132,7 @@ struct EntityEditorView: View {
         toStash = summary?.defaults.pumping_to_stash ?? true
         fromStash = Self.bottleFromStashDefault(defaultOn: summary?.defaults.bottle_from_stash ?? false,
                                                 summary: summary, hasStashActivity: cachedStashActivity)
+        if entity == nil, let eventTypePreset { eventTypes = [eventTypePreset] }
         if entity == nil, let preset = stashPreset {
             stashKind = preset.kind
             if let a = preset.amount { amount = trimmed(a) }
@@ -1095,6 +1178,7 @@ struct EntityEditorView: View {
                 discardReason = p["stash_discard_reason"] as? String ?? ""
             }
         }
+        if kind == .event, let type = p["type"] as? String, !type.isEmpty { eventTypes = [type] }
         if entity != nil, kind == .stashAdjustment {
             if let k = (p["kind"] as? String).flatMap(StashKind.init(rawValue:)) { stashKind = k }
             stashReason = p["reason"] as? String ?? ""
@@ -1139,6 +1223,12 @@ struct EntityEditorView: View {
         } else if let entity {
             repo.update(entity, payload: payload)
             target = entity
+        } else if kind == .event {
+            // One event per chosen type, all at the same time, so each type's "time since" is right.
+            let payloads = Self.eventPayloads(child: childID, types: eventTypes,
+                                              time: APIDate.isoDateTime.string(from: time),
+                                              notes: notes, tags: tagNames)
+            target = payloads.compactMap { repo.create(kind: .event, payload: $0, source: source) }.last
         } else {
             target = repo.create(kind: kind, payload: payload, source: source)
         }
@@ -1230,13 +1320,16 @@ struct EntityEditorView: View {
             p["dosage_unit"] = dosageUnit
             p["next_dose_interval"] = doseIntervalSeconds.map(APIDuration.string(from:)) ?? NSNull()
             p["notes"] = notes; p["tags"] = tagList
+        case .event:
+            p = Self.eventPayloads(child: childID, types: Set(eventTypes.prefix(1)), time: iso(time),
+                                   notes: notes, tags: tagList).first ?? p
         case .stashAdjustment:
             p = Self.stashEntryPayload(kind: stashKind, amount: ActivityDraft.number(amount), time: iso(time),
                                        reason: stashReason, parentID: parentID,
                                        parentCount: parentChoices.count, isNew: entity == nil,
                                        pinsParent: stashPreset?.pinsParent ?? false,
                                        notes: notes, tags: tagList)
-        case .timer, .child, .parent:
+        case .timer, .child, .parent, .eventType:
             break
         }
         // Preserve the server id when editing so the payload round-trips.
@@ -1342,6 +1435,15 @@ struct EntityEditorView: View {
     static func cappedReason(_ reason: String) -> String {
         let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
         return String(String.UnicodeScalarView(trimmed.unicodeScalars.prefix(255)))
+    }
+
+    /// The events a save creates: one per chosen event type (by slug), all for `child` at the
+    /// identical `time`, with the same notes and tags. Sorted by slug so the order is stable.
+    static func eventPayloads(child: Int, types: Set<String>, time: String, notes: String,
+                              tags: [String]) -> [[String: Any]] {
+        types.sorted().map { slug in
+            ["child": child, "type": slug, "time": time, "notes": notes, "tags": tags]
+        }
     }
 
     /// A stash entry's payload: kind, amount, time, reason, notes and tags, and never a `child` (the

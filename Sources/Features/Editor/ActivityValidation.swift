@@ -16,6 +16,7 @@ enum ActivityProblem: Equatable {
     case stashBottleAmountRequired
     case stashTakenInvalid
     case discardedAmountRequired
+    case eventTypeRequired
     case startAfterEnd
     case over24Hours
     case futureTimestamp
@@ -36,6 +37,7 @@ enum ActivityProblem: Equatable {
         case .stashBottleAmountRequired: return "Enter an amount to take from the stash."
         case .stashTakenInvalid:     return "The amount from the stash has to be more than 0 ml and no more than the amount fed. Change it under More."
         case .discardedAmountRequired: return "Enter how much was discarded, at least 0.1 ml."
+        case .eventTypeRequired:     return "Choose at least one event type."
         case .startAfterEnd:         return "The start time is after the end time."
         case .over24Hours:           return "Baby Buddy won't accept more than 24 hours between start and end."
         case .futureTimestamp:       return "That time is in the future — Baby Buddy only accepts times up to now."
@@ -80,6 +82,9 @@ struct ActivityDraft {
     var stashAmount = ""
     var discardsSome = false
     var discardedAmount = ""
+    /// How many event types an event has chosen: one when editing, one or more when logging several
+    /// at once.
+    var eventTypeCount = 0
     /// Injected so the future-timestamp rules are testable against a fixed clock.
     var now = Date()
 
@@ -110,7 +115,10 @@ struct ActivityDraft {
             return isFuture(time) ? .futureTimestamp : nil
         case .stashAdjustment:
             return stashAmountProblem ?? (isFuture(time) ? .futureTimestamp : nil)
-        case .timer, .child, .parent:
+        case .event:
+            if eventTypeCount == 0 { return .eventTypeRequired }
+            return isFuture(time) ? .futureTimestamp : nil
+        case .timer, .child, .parent, .eventType:
             return nil // not editable in this form
         }
     }

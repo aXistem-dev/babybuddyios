@@ -44,6 +44,7 @@ enum BBColor {
     static let pumping = Color.adaptive(light: "44C4DD", dark: "5FC6DA")
     static let change  = Color.adaptive(light: "8A6D3B", dark: "C9AF83") // diaper — warm tan
     static let note    = Color.adaptive(light: "6C757D", dark: "9AA0A6")
+    static let event   = Color.adaptive(light: "8455B8", dark: "BC9BE3") // user-defined events
 
     // MARK: Timeline & inline tag chips
     static let railLine = Color.adaptive(light: "DDE2E7", dark: "23272E") // timeline spine
@@ -82,6 +83,7 @@ enum BBColor {
         case .pumping, .stashAdjustment: return pumping
         case .change: return change
         case .note: return note
+        case .event, .eventType: return event
         case .medication: return danger
         case .weight, .height, .headCircumference, .temperature, .bmi: return brand
         case .timer, .child, .parent: return brand

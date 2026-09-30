@@ -163,7 +163,7 @@ struct EventRow: View {
             HStack(spacing: 12) {
                 ActivityTile(kind: entity.kind, size: 40, glyph: 21)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(entity.kind.displayName).font(.subheadline.weight(.semibold))
+                    Text(EntityFormatting.title(entity)).font(.subheadline.weight(.semibold))
                     if let subtitle = EntityFormatting.subtitle(entity, unit: unit ?? .region), !subtitle.isEmpty {
                         Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
