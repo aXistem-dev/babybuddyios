@@ -244,9 +244,11 @@ struct TimelineView: View {
         let child = selectedChildID
         let parentIDs = EntityVisibility.parentIDs(forChild: child, in: events)
         let showsStash = StashCapability.isSupported
+        let showsEvents = EventsCapability.isSupported
         return events.filter {
             guard EntityVisibility.isVisible($0, forChild: child, parentIDs: parentIDs),
-                  showsStash || $0.kind != EntityKind.stashAdjustment else { return false }
+                  showsStash || $0.kind != EntityKind.stashAdjustment,
+                  showsEvents || $0.kind != EntityKind.event else { return false }
             return (kindFilter == nil || $0.kind == kindFilter)
                 && TimelineFiltering.inDateRange($0.timestamp, from: dateFrom, to: dateTo)
                 && TimelineFiltering.matchesSearch($0, query: searchText, childName: childName)
@@ -517,10 +519,12 @@ private struct TimelineFiltersView: View {
 
     private var hasActiveFilters: Bool { kindFilter != nil || dateFrom != nil || dateTo != nil }
 
-    /// The timeline's kinds, less the stash adjustment on a server without the milk stash, which
-    /// has no such records to filter to.
+    /// The timeline's kinds, less the stash adjustment on a server without the milk stash and the
+    /// event on one without events, which have no such records to filter to.
     private var filterKinds: [EntityKind] {
-        EntityKind.timelineKinds.filter { $0 != .stashAdjustment || StashCapability.isSupported }
+        EntityKind.timelineKinds.filter {
+            ($0 != .stashAdjustment || StashCapability.isSupported) && ($0 != .event || EventsCapability.isSupported)
+        }
     }
 
     /// Default seed when a date bound is first enabled: 30 days back for "from", today for "to".

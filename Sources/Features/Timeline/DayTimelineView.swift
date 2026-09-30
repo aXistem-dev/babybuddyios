@@ -51,13 +51,15 @@ struct DayTimelineView: View {
     }
 
     /// The fetched events this child sees (see ``EntityVisibility``); stash adjustments only on a
-    /// server with the milk stash.
+    /// server with the milk stash, and events only on one with events.
     private var visibleEvents: [LocalEntity] {
         let parentIDs = EntityVisibility.parentIDs(forChild: childID, in: events)
         let showsStash = StashCapability.isSupported
+        let showsEvents = EventsCapability.isSupported
         return events.filter {
             EntityVisibility.isVisible($0, forChild: childID, parentIDs: parentIDs)
                 && (showsStash || $0.kind != EntityKind.stashAdjustment)
+                && (showsEvents || $0.kind != EntityKind.event)
         }
     }
 

@@ -261,6 +261,26 @@ struct ParentDTO: APIResource {
     var produces_milk: Bool?
 }
 
+/// A user-defined event type, on a server with events. Looked up by its `slug`, which is fixed when
+/// the type is created and survives a rename.
+struct EventTypeDTO: APIResource {
+    static let path = "event-types"
+    var id: Int?
+    var name: String
+    var slug: String
+}
+
+/// Something that happened to a child, of one event type: `type` is that type's slug.
+struct EventDTO: APIResource {
+    static let path = "events"
+    var id: Int?
+    var child: Int
+    var type: String
+    var time: Date
+    var notes: String?
+    var tags: [String]?
+}
+
 struct StashAdjustmentDTO: APIResource {
     static let path = "stash-adjustments"
     var id: Int?

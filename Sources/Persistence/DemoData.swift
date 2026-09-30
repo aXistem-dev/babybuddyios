@@ -35,6 +35,7 @@ enum DemoData {
         let existing = (try? context.fetch(FetchDescriptor<LocalEntity>()))?.isEmpty ?? true
         guard existing else {
             refreshDemoStash(in: context)
+            refreshDemoEvents(in: context)
             return
         }
 
@@ -95,6 +96,9 @@ enum DemoData {
         if ProcessInfo.processInfo.environment["BB_NO_STASH"] != "1" {
             seedStash(into: context)
         }
+        if ProcessInfo.processInfo.environment["BB_NO_EVENTS"] != "1" {
+            seedEvents(into: context)
+        }
 
         if ProcessInfo.processInfo.environment["BB_SEED_CONFLICT"] == "1" {
             seedConflict(into: context)
@@ -110,6 +114,46 @@ enum DemoData {
         }
         try? context.save()
         refreshDemoStash(in: context)
+        refreshDemoEvents(in: context)
+    }
+
+    // MARK: Events
+
+    /// Events, as a server with them would hold them: three event types, and events of them for the
+    /// demo child, among them a bath and a nail trim logged together at the identical time (one
+    /// event per type, as the app logs several at once). ids 5000+ (types 1–3).
+    @MainActor
+    private static func seedEvents(into context: ModelContext) {
+        let now = Date()
+        func iso(_ hoursAgo: Double) -> String {
+            APIDate.isoDateTime.string(from: now.addingTimeInterval(-hoursAgo * 3600))
+        }
+        for (id, name, slug) in [(1, "Bath", "bath"), (2, "Nail trim", "nail-trim"),
+                                 (3, "Outfit change", "outfit-change")] {
+            insert(.eventType, id: id, ["id": id, "name": name, "slug": slug], context)
+        }
+        let together = iso(26)
+        for (id, type, time) in [(5000, "bath", iso(50)), (5001, "bath", together),
+                                 (5002, "nail-trim", together), (5003, "outfit-change", iso(3))] {
+            insert(.event, id: id, [
+                "id": id, "child": 1, "type": type, "time": time, "notes": "", "tags": [],
+            ], context)
+        }
+    }
+
+    /// Demo mode's stand-in for what a sync learns about events from `GET /api/`, and the cached
+    /// event types' names. `BB_NO_EVENTS=1` runs the demo as a server without events.
+    @MainActor
+    private static func refreshDemoEvents(in context: ModelContext) {
+        guard ProcessInfo.processInfo.environment["BB_NO_EVENTS"] != "1" else {
+            EventsCapability.update(rootJSON: Data(#"{"children":"x","notes":"x"}"#.utf8))
+            return
+        }
+        EventsCapability.update(rootJSON: Data(#"{"event-types":"x","events":"x"}"#.utf8))
+        let kind = EntityKind.eventType.rawValue
+        let types = (try? context.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        EventsCapability.store(typesIn: types)
     }
 
     // MARK: Milk stash

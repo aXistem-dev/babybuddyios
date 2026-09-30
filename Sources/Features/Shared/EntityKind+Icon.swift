@@ -6,11 +6,11 @@ extension EntityKind {
     /// Asset-catalog name of the custom glyph, e.g. `glyph_feeding`.
     var assetName: String { "glyph_\(rawValue)" }
 
-    /// Whether the asset catalog has a custom glyph for this kind. The milk stash kinds have
-    /// none (the web app's icon font has no glyph for them) and use their SF Symbol instead.
+    /// Whether the asset catalog has a custom glyph for this kind. The milk stash and event kinds
+    /// have none (the web app's icon font has no glyph for them) and use their SF Symbol instead.
     var hasGlyph: Bool {
         switch self {
-        case .parent, .stashAdjustment: return false
+        case .parent, .stashAdjustment, .eventType, .event: return false
         default: return true
         }
     }
