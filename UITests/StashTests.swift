@@ -77,7 +77,8 @@ final class StashTests: UITestCase {
                                                          "Spilled, left over…", "Reason (optional)")).firstMatch
         tap(reason)
         reason.typeText("Spilled")
-        let amount = app.textFields["0"]
+        // The discard's field keeps its "0" prompt once filled in, so the bottle's is the first.
+        let amount = app.textFields.matching(identifier: "0").element(boundBy: 0)
         tap(amount)
         amount.typeText("75")
         tap(bar.buttons["Save"])
