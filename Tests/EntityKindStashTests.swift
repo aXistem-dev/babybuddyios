@@ -143,5 +143,12 @@ final class EntityKindStashTests: XCTestCase {
         XCTAssertEqual(parent.first_name, "Robin")
         XCTAssertEqual(parent.children, [1, 2])
         XCTAssertNil(parent.picture)
+        XCTAssertNil(parent.produces_milk, "A server from before the flag: the parent produces milk")
+
+        let flagged = try APICoders.decoder.decode(ParentDTO.self, from: Data("""
+        {"id": 2, "first_name": "Sam", "last_name": "", "slug": "sam",
+         "picture": null, "children": [1], "produces_milk": false}
+        """.utf8))
+        XCTAssertEqual(flagged.produces_milk, false)
     }
 }

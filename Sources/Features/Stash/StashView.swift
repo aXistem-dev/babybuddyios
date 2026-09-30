@@ -249,7 +249,8 @@ struct StashView: View {
         }
     }
 
-    /// A parent's last session, their last 7 days' total and a bar per day.
+    /// A parent's last session, their last 7 days' total and a bar per day. Named only when there
+    /// are several parents who produce milk to tell apart.
     private func parentCard(_ parent: ParentRow) -> some View {
         let series = aggregator.pumpingByDay(records, parentID: parent.id, period: .week)
         let weekTotal = series.reduce(0.0) { $0 + $1.totalAmount }
@@ -264,7 +265,7 @@ struct StashView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 9) {
                     ActivityTile(kind: .pumping, size: 30, glyph: 17)
-                    Text(parent.name).font(.headline)
+                    if showsParentNames { Text(parent.name).font(.headline) }
                     Spacer(minLength: 8)
                     Text("7 days: \(EntityFormatting.formatAmount(weekTotal))")
                         .font(.caption.weight(.medium))
@@ -335,13 +336,22 @@ struct StashView: View {
         records.filter { $0.kind == .child }.sorted { $0.timestamp < $1.timestamp }
     }
 
+    /// Every cached parent, whether they produce milk or not.
+    private var allParents: [MilkParents.Parent] { MilkParents.all(in: records) }
+
+    /// Whether lots and pumping cards name their parent: only with several who produce milk.
+    private var showsParentNames: Bool { MilkParents.showsNames(allParents) }
+
+    private func parentName(_ id: Int) -> String? {
+        allParents.first { $0.id == id }.map { $0.name.isEmpty ? "Parent" : $0.name }
+    }
+
+    /// A pumping card for each parent who produces milk, and for any other with pumping synced.
     private var parents: [ParentRow] {
-        records.compactMap { entity -> ParentRow? in
-            guard entity.kind == .parent,
-                  let id = (entity.payloadObject["id"] as? Int) ?? entity.serverID else { return nil }
-            return ParentRow(id: id, name: entity.payloadObject["first_name"] as? String ?? "Parent")
-        }
-        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let pumped = Set(sessions.compactMap { $0.payloadObject["parent"] as? Int })
+        return allParents
+            .filter { $0.producesMilk || pumped.contains($0.id) }
+            .map { ParentRow(id: $0.id, name: $0.name.isEmpty ? "Parent" : $0.name) }
     }
 
     /// Pumping that belongs to a parent (the stash's milk), newest first.

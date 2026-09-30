@@ -74,4 +74,43 @@ final class EntityVisibilityTests: XCTestCase {
         XCTAssertFalse(EntityVisibility.isVisible(feeding, forChild: 2, parentIDs: [7]))
         XCTAssertFalse(EntityVisibility.isVisible(timer, forChild: 1, parentIDs: [7]))
     }
+
+    // MARK: Parents who produce milk
+
+    /// A parent produces milk unless the server says otherwise (one synced before the flag does);
+    /// deleted parents are left out; the rest come by first name.
+    func testMilkParentsReadTheFlag() {
+        let robin = entity(.parent, ["id": 1, "first_name": "Robin", "children": [1]], serverID: 1)
+        let sam = entity(.parent, ["id": 2, "first_name": "Sam", "children": [1], "produces_milk": false],
+                         serverID: 2)
+        let casey = entity(.parent, ["id": 3, "first_name": "Casey", "children": [], "produces_milk": true],
+                           serverID: 3)
+        let gone = entity(.parent, ["id": 4, "first_name": "Alex", "children": [1]], serverID: 4)
+        gone.syncState = .pendingDelete
+        let feeding = entity(.feeding, ["id": 9, "child": 1, "start": "2026-06-15T08:00:00Z"], serverID: 9)
+
+        let all = MilkParents.all(in: [robin, sam, casey, gone, feeding])
+        XCTAssertEqual(all.map(\.name), ["Casey", "Robin", "Sam"])
+        XCTAssertEqual(all.map(\.producesMilk), [true, true, false])
+        XCTAssertEqual(all.first { $0.id == 2 }?.children, [1])
+    }
+
+    /// Pickers offer parents who produce milk, and an entry's own parent even when they no longer do.
+    /// With exactly one who produces milk, that one is filled in and nobody's name is shown.
+    func testMilkParentChoices() {
+        let robin = MilkParents.Parent(id: 1, name: "Robin", producesMilk: true, children: [1])
+        let sam = MilkParents.Parent(id: 2, name: "Sam", producesMilk: false, children: [1])
+        let casey = MilkParents.Parent(id: 3, name: "Casey", producesMilk: true, children: [1])
+
+        XCTAssertEqual(MilkParents.choices([robin, sam, casey], keeping: nil).map(\.id), [1, 3])
+        XCTAssertEqual(MilkParents.choices([robin, sam, casey], keeping: 2).map(\.id), [1, 2, 3])
+        XCTAssertEqual(MilkParents.choices([robin, sam], keeping: 1).map(\.id), [1])
+
+        XCTAssertEqual(MilkParents.single([robin, sam]), robin)
+        XCTAssertNil(MilkParents.single([robin, sam, casey]))
+        XCTAssertNil(MilkParents.single([sam]))
+
+        XCTAssertFalse(MilkParents.showsNames([robin, sam]))
+        XCTAssertTrue(MilkParents.showsNames([robin, sam, casey]))
+    }
 }

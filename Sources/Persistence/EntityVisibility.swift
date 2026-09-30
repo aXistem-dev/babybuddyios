@@ -47,3 +47,50 @@ enum EntityVisibility {
         }
     }
 }
+
+/// The parents who produce breast milk (`produces_milk`), the only ones a server with the milk stash
+/// takes as who pumped, who breastfed or whose milk. A parent synced before the server sent the flag
+/// produces milk, as the server's default says. With exactly one, the server fills that parent in
+/// wherever one is needed, so the app hides every parent picker and name.
+enum MilkParents {
+    /// A cached parent, as the parent pickers and the stash screen list it.
+    struct Parent: Equatable {
+        let id: Int
+        let name: String
+        let producesMilk: Bool
+        /// The children this parent is linked to.
+        let children: [Int]
+    }
+
+    /// Every cached parent that isn't being deleted, by first name. A parent created on this device
+    /// has no `serverID` yet, so its payload `id` is read first.
+    static func all(in entities: [LocalEntity]) -> [Parent] {
+        entities.compactMap { entity -> Parent? in
+            guard entity.kind == .parent, entity.syncState != .pendingDelete else { return nil }
+            let p = entity.payloadObject
+            guard let id = (p["id"] as? Int) ?? entity.serverID else { return nil }
+            return Parent(id: id, name: p["first_name"] as? String ?? "",
+                          producesMilk: p["produces_milk"] as? Bool ?? true,
+                          children: p["children"] as? [Int] ?? [])
+        }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// The parents a picker offers: those who produce milk, and `current`, an entry's own saved
+    /// parent, so an entry from before its parent stopped producing milk stays editable (the server
+    /// takes that one back, and refuses any other parent who doesn't produce milk).
+    static func choices(_ parents: [Parent], keeping current: Int?) -> [Parent] {
+        parents.filter { $0.producesMilk || $0.id == current }
+    }
+
+    /// The only parent who produces milk; nil with none or several.
+    static func single(_ parents: [Parent]) -> Parent? {
+        let milk = parents.filter(\.producesMilk)
+        return milk.count == 1 ? milk.first : nil
+    }
+
+    /// Whether parents are told apart by name: only with several who produce milk.
+    static func showsNames(_ parents: [Parent]) -> Bool {
+        parents.filter(\.producesMilk).count > 1
+    }
+}

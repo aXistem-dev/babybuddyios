@@ -69,8 +69,8 @@ struct ActivityDraft {
     /// parent, so it needs one.
     var parentID: Int?
     var requiresParent = false
-    /// Whether any parent is cached. With none the picker is hidden, so "Choose who pumped." would
-    /// point at nothing: the parent has to be added on the server first.
+    /// Whether any parent who produces milk is on offer. With none the picker is hidden, so "Choose
+    /// who pumped." would point at nothing: the parent has to be added on the server first.
     var hasParents = true
     // The milk stash, on a server with it (the editor sets these only there): pumping with
     // "Store in stash" on, or a breast-milk bottle with "Taken from stash" on; the amount stored or

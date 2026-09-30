@@ -1,17 +1,20 @@
 import XCTest
 
-/// The milk stash, on a demo server that has it: one parent, Robin, linked to the demo child.
-/// `BB_NO_STASH=1` runs the demo as a server without it.
+/// The milk stash, on a demo server that has it: two parents linked to the demo child, Robin, who
+/// produces milk, and Sam, who doesn't. With one parent who produces milk, every parent picker and
+/// name is hidden; `BB_MILK_PARENTS=2` adds Casey, a second one. `BB_NO_STASH=1` runs the demo as a
+/// server without the milk stash.
 final class StashTests: UITestCase {
-    /// A new pumping is logged on the child's only parent and goes into the stash by default. It
-    /// has no child, and still shows on the stash screen and the child's timeline. (Demo history
-    /// pumps 60–140 ml.)
+    /// A new pumping is logged on the only parent who produces milk, with no picker, and goes into
+    /// the stash by default. It has no child, and still shows on the stash screen and the child's
+    /// timeline. (Demo history pumps 60–140 ml.)
     func testPumpingLogsOnParentIntoStash() {
         launch()
         openEditor("Pumping")
         let bar = expect(app.navigationBars["New Pumping"])
-        XCTAssertTrue(expect(app.buttons["Robin"]).isSelected, "The child's only parent starts selected")
         expectValue(app.switches["Store in stash"], "1")
+        XCTAssertFalse(app.staticTexts["Who pumped"].exists, "Robin is the only parent who produces milk")
+        XCTAssertFalse(app.buttons["Sam"].exists)
 
         let amount = app.textFields["0"]
         tap(amount)
@@ -29,8 +32,8 @@ final class StashTests: UITestCase {
         expect(elements("label BEGINSWITH 'Pumping, ' AND label CONTAINS '185 ml'").firstMatch)
     }
 
-    /// Robin's seeded 240 ml session opens from the child's timeline on Robin, stored; saving it
-    /// keeps it a parent's pumping there.
+    /// Robin's seeded 240 ml session opens from the child's timeline, stored, with no picker while
+    /// Robin is the only parent who produces milk; saving it keeps it a parent's pumping there.
     func testParentPumpingEditsOnParent() {
         launch(["BB_START_TAB": "timeline"])
         let search = app.searchFields.firstMatch
@@ -38,8 +41,8 @@ final class StashTests: UITestCase {
         search.typeText("240")
         tap(elements("label BEGINSWITH 'Pumping, ' AND label CONTAINS '240 ml'").firstMatch)
         let bar = expect(app.navigationBars["Edit Pumping"])
-        XCTAssertTrue(expect(app.buttons["Robin"]).isSelected)
         expectValue(app.switches["Store in stash"], "1")
+        XCTAssertFalse(app.staticTexts["Who pumped"].exists)
 
         tap(bar.buttons["Save"])
         expectGone(bar)
@@ -48,14 +51,14 @@ final class StashTests: UITestCase {
 
     /// A breast-milk bottle is taken from the stash by default, and then needs an amount. Some of it
     /// discarded, with a reason, reopens as it was saved. A breastfeed shows no stash switch, and no
-    /// "Breastfed by" picker while Robin is the child's only parent.
+    /// "Breastfed by" picker while Robin is the only parent who produces milk.
     func testBottleFromStashWithDiscard() {
         launch()
         openEditor("Feeding")
         let bar = expect(app.navigationBars["New Feeding"])
         XCTAssertTrue(app.buttons["Breast"].isSelected)
         XCTAssertFalse(app.switches["Taken from stash"].exists, "A breastfeed isn't taken from the stash")
-        XCTAssertFalse(app.staticTexts["Breastfed by"].exists, "The only parent needs no picker")
+        XCTAssertFalse(app.staticTexts["Breastfed by"].exists, "The only parent who produces milk needs no picker")
 
         tap(app.buttons.labeled("Left Breast"))
         tap(app.buttons["Bottle"])
@@ -119,7 +122,7 @@ final class StashTests: UITestCase {
         tap(app.buttons["Discard milk"])
         let bar = expect(app.navigationBars["New Stash adjustment"])
         XCTAssertTrue(expect(app.buttons["Discarded"]).isSelected)
-        XCTAssertFalse(app.staticTexts["Whose milk"].exists, "Robin is the only parent")
+        XCTAssertFalse(app.staticTexts["Whose milk"].exists, "Robin is the only parent who produces milk")
         let amount = app.textFields["0"]
         tap(amount)
         amount.typeText("20")
@@ -140,6 +143,8 @@ final class StashTests: UITestCase {
         launch()
         openStash()
         expect(app.buttons["Throw away all expired milk"])
+        XCTAssertFalse(elements("label CONTAINS 'Robin'").firstMatch.exists,
+                       "With one parent who produces milk, the stash screen names nobody")
         tap(app.buttons["Throw away"])
         expect(app.navigationBars["New Stash adjustment"])
         XCTAssertTrue(expect(app.buttons["Discarded"]).isSelected)
