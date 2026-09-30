@@ -303,6 +303,9 @@ struct StashSummaryDTO: Codable, Equatable {
     var oldest_age_hours: Double?
     var lots: [StashLotDTO]
     var defaults: Defaults
+    /// When the balance last dropped below zero; nil while it isn't (or from a server that doesn't
+    /// send it). Identifies the current dip, so a dismissed warning returns for the next one.
+    var negative_since: Date? = nil
 }
 
 struct TagDTO: Codable, Identifiable, Hashable {

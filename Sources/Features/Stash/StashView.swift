@@ -19,7 +19,7 @@ struct StashView: View {
     @State private var entryLimit = 20
     @State private var sessionLimit = 20
     @AppStorage(StashNegativeWarning.dismissedKey, store: SharedDefaults.suite)
-    private var warningDismissed = false
+    private var warningDismissedToken: String?
 
     private let aggregator = ChartAggregator()
 
@@ -37,7 +37,7 @@ struct StashView: View {
         let summary = model.summary
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if StashNegativeWarning.shows(balance: summary?.balance, dismissed: warningDismissed) {
+                if StashNegativeWarning.shows(summary: summary, dismissedToken: warningDismissedToken) {
                     negativeWarning
                 }
                 balanceCard(summary)
@@ -78,7 +78,7 @@ struct StashView: View {
                 Spacer(minLength: 0)
             }
             .accessibilityElement(children: .combine)
-            Button("Dismiss") { warningDismissed = true }
+            Button("Dismiss") { warningDismissedToken = StashNegativeWarning.token(for: model.summary) }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(BBColor.brandAccent)
                 .buttonStyle(.plain)

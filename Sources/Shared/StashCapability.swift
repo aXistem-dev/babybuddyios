@@ -32,6 +32,10 @@ enum StashCapability {
 
     /// Cache the summary from `GET /api/stash`, or clear it with `nil`.
     static func store(summary: StashSummaryDTO?) {
+        if let summary, summary.balance >= 0 {
+            // Back at or above zero: the next dip shows the warning again.
+            SharedDefaults.suite.removeObject(forKey: negativeWarningDismissedKey)
+        }
         if let summary, let data = try? APICoders.encoder.encode(summary) {
             SharedDefaults.suite.set(data, forKey: summaryKey)
         } else {
