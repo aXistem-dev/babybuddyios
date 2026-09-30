@@ -22,8 +22,9 @@ struct DashboardView: View {
     /// so ``childEntities`` can show a linked parent's pumping (see ``EntityVisibility``). Rebuilt
     /// on child switch via `init`.
     @Query private var allEntities: [LocalEntity]
-    /// Navigation path for the day-timeline pushes (in-app "Today" tiles + the status widget).
-    @State private var navPath: [EntityKind] = []
+    /// Navigation path for the day-timeline pushes (in-app "Today" tiles + the status widget) and
+    /// the milk stash screen (the stash card + `babybuddy://stash`).
+    @State private var navPath: [DashboardRoute] = []
     @State private var addKind: EntityKind?
     @State private var editing: LocalEntity?
     /// A dose whose reminder was tapped: the editor opens a new dose pre-filled from it.
@@ -43,8 +44,6 @@ struct DashboardView: View {
     @State private var pendingConvert: ConvertRequest?
     /// The milk stash summary, on a server with the milk stash, for the stash card.
     @State private var stash = StashViewModel()
-    /// The milk stash screen, pushed from the stash card or `babybuddy://stash`.
-    @State private var showingStash = false
 
     // MARK: Support nudge state
     //
@@ -169,11 +168,13 @@ struct DashboardView: View {
             }
             .background(BBColor.surface)
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: EntityKind.self) { kind in
-                DayTimelineView(kind: kind, childID: selectedChildID)
-            }
-            .navigationDestination(isPresented: $showingStash) {
-                StashView(childID: selectedChildID)
+            // One value-based destination for both screens: an `isPresented:` destination next to
+            // the path re-renders the stash screen in a loop, which hangs the app.
+            .navigationDestination(for: DashboardRoute.self) { route in
+                switch route {
+                case .day(let kind): DayTimelineView(kind: kind, childID: selectedChildID)
+                case .stash: StashView(childID: selectedChildID)
+                }
             }
             .overlay(alignment: .bottom) {
                 UndoToastView().padding(.bottom, 84) // clear of the floating add button
@@ -588,7 +589,7 @@ struct DashboardView: View {
         let today = EntityFormatting.formatAmount(StashUse.totals(childEntities, childID: selectedChildID).today)
         let oldest = summary?.oldest_age_hours.map { "oldest \(Int($0)) h" }
         let detail = ["\(currentChildName) had \(today) today", oldest].compactMap { $0 }.joined(separator: " · ")
-        return Button { showingStash = true } label: {
+        return Button { navPath.append(.stash) } label: {
             BBCard {
                 HStack(spacing: 12) {
                     ActivityTile(kind: .stashAdjustment, size: 40, glyph: 21)
@@ -615,7 +616,7 @@ struct DashboardView: View {
     /// Wrap a "Today" tile so tapping it pushes a single-day, single-kind timeline slice.
     private func metricLink<Content: View>(_ kind: EntityKind,
                                            @ViewBuilder _ tile: () -> Content) -> some View {
-        NavigationLink(value: kind) { tile() }
+        NavigationLink(value: DashboardRoute.day(kind)) { tile() }
             .buttonStyle(.plain)
     }
 
@@ -723,7 +724,7 @@ struct DashboardView: View {
     /// "Today" tiles).
     private func openDay(_ kind: EntityKind?) {
         guard let kind else { return }
-        navPath = [kind]
+        navPath = [.day(kind)]
         router.openDayKind = nil
     }
 
@@ -731,7 +732,7 @@ struct DashboardView: View {
     private func openStash(_ show: Bool) {
         guard show else { return }
         router.showStash = false
-        if StashCapability.isSupported { showingStash = true }
+        if StashCapability.isSupported { navPath = [.stash] }
     }
 
     /// Stop tapped: the timer stops now, here and (once the DELETE lands) on the server, then the
@@ -1043,4 +1044,12 @@ private struct AllActivitiesSheet: View {
             }
         }
     }
+}
+
+/// A screen the Dashboard's navigation stack pushes.
+enum DashboardRoute: Hashable {
+    /// A "Today" tile's single-day timeline for one kind.
+    case day(EntityKind)
+    /// The milk stash screen.
+    case stash
 }
