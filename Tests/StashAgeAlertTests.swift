@@ -116,5 +116,7 @@ final class StashAgeAlertTests: XCTestCase {
         XCTAssertEqual(SettingsView.stashAlertsSubtitle(summary(lots: [])),
                        "Use first after 48 h, throw away after 72 h (set on the server)")
         XCTAssertNil(SettingsView.stashAlertsSubtitle(nil))
+        XCTAssertEqual(SettingsView.stashAlertsSubtitle(summary(lots: []), inSettings: true),
+                       "Use first after 48 h, throw away after 72 h (set in Milk stash)")
     }
 }

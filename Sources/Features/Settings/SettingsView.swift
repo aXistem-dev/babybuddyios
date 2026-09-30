@@ -110,6 +110,8 @@ struct SettingsView: View {
 
                     sectioned("Sick mode") { sickModeCard }
 
+                    if StashCapability.hasSettings { StashSettingsSection() }
+
                     sectioned("Notifications") {
                         notificationsCard
                         Text("Each phone schedules its own medication reminders from synced doses, so pull to refresh before giving a dose in case someone else just logged one.")
@@ -573,7 +575,8 @@ struct SettingsView: View {
                 rowDivider
 
                 SettingsRow(symbol: "clock.badge.exclamationmark", tint: BBColor.pumping, title: "Milk age alerts",
-                            subtitle: Self.stashAlertsSubtitle(StashCapability.summary)) {
+                            subtitle: Self.stashAlertsSubtitle(StashCapability.summary,
+                                                               inSettings: StashCapability.hasSettings)) {
                     Self.alertToggle("Milk age alerts", $stashAlertsEnabled, setting: "stashAgeAlerts")
                 }
             }
@@ -581,9 +584,11 @@ struct SettingsView: View {
     }
 
     /// The server's milk age limits, which the alerts follow; none until a summary has synced.
-    static func stashAlertsSubtitle(_ summary: StashSummaryDTO?) -> String? {
+    /// `inSettings`: the server's settings are in Settings ▸ Milk stash, so the subtitle points there.
+    static func stashAlertsSubtitle(_ summary: StashSummaryDTO?, inSettings: Bool = false) -> String? {
         summary.map {
-            "Use first after \(Int($0.warn_age_hours)) h, throw away after \(Int($0.max_age_hours)) h (set on the server)"
+            "Use first after \(Int($0.warn_age_hours)) h, throw away after \(Int($0.max_age_hours)) h "
+                + (inSettings ? "(set in Milk stash)" : "(set on the server)")
         }
     }
 

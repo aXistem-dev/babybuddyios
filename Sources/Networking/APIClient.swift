@@ -214,6 +214,14 @@ final class APIClient {
         try await sendRaw(try makeRequest(path: path, method: "GET"))
     }
 
+    /// PATCH `<base>/api/<path>` with a JSON body, for a non-collection route such as
+    /// `"stash/settings"`. Returns the raw response.
+    func patchRawPath(_ path: String, body: Data) async throws -> Data {
+        var req = try makeRequest(path: path, method: "PATCH")
+        req.httpBody = body
+        return try await sendRaw(req)
+    }
+
     func createRaw(path: String, body: Data) async throws -> Data {
         var req = try makeRequest(path: "\(path)/", method: "POST")
         req.httpBody = body

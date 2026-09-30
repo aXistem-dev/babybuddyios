@@ -214,7 +214,7 @@ final class StashTests: UITestCase {
     func testMilkAgeAlertsSetting() {
         launch(["BB_START_TAB": "settings"])
         let alerts = expect(app.switches["Milk age alerts"])
-        expect(app.staticTexts["Use first after 48 h, throw away after 72 h (set on the server)"])
+        expect(app.staticTexts["Use first after 48 h, throw away after 72 h (set in Milk stash)"])
         expectValue(alerts, "0")
         toggle(alerts, to: "1")
         allowNotificationsIfAsked() // turning them on is what asks for permission
@@ -240,6 +240,41 @@ final class StashTests: UITestCase {
 
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "The tap should bring the app back")
         expect(app.navigationBars["Milk stash"])
+    }
+
+    // MARK: Stash settings
+
+    /// Settings ▸ Milk stash shows the server's stash settings; a toggle saves at once and is still
+    /// changed when the section opens again.
+    func testStashSettingsSection() {
+        launch(["BB_START_TAB": "settings"])
+        expect(app.staticTexts["MILK STASH"]) // section headers are drawn in capitals
+        expect(app.staticTexts["Use first after"])
+        expect(app.staticTexts["48 h"])
+        expect(app.staticTexts["72 h"])
+        let store = expect(app.switches["Store pumping in the stash"])
+        expectValue(store, "1")
+        toggle(store, to: "0")
+
+        tap(app.tabBars.buttons["Home"])
+        tap(app.tabBars.buttons["Settings"])
+        expectValue(expect(app.switches["Store pumping in the stash"]), "0")
+        XCTAssertFalse(app.staticTexts["Only an administrator can change these."].exists)
+    }
+
+    /// Someone the server doesn't let change them sees the settings, read-only.
+    func testStashSettingsReadOnly() {
+        launch(["BB_START_TAB": "settings", "BB_STASH_SETTINGS_READONLY": "1"])
+        expect(app.staticTexts["Only an administrator can change these."])
+        XCTAssertFalse(expect(app.switches["Store pumping in the stash"]).isEnabled)
+        XCTAssertFalse(app.switches["Bottles from the stash"].isEnabled)
+    }
+
+    func testNoStashSettingsWithoutStash() {
+        launch(["BB_START_TAB": "settings", "BB_NO_STASH": "1"])
+        expect(app.navigationBars["Settings"])
+        XCTAssertFalse(app.staticTexts["MILK STASH"].exists)
+        XCTAssertFalse(app.switches["Store pumping in the stash"].exists)
     }
 
     // MARK: Trends

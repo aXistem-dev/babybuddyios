@@ -110,6 +110,13 @@ actor SyncActor {
             StashCapability.update(rootJSON: root)
             // The same root says whether the server has events.
             EventsCapability.update(rootJSON: root)
+            if StashCapability.hasSettings {
+                // The Settings section's values, cached for offline. A failure keeps the cache.
+                if let data = try? await client.getRawPath(StashCapability.settingsRootKey),
+                   let settings = try? APICoders.decoder.decode(StashSettingsDTO.self, from: data) {
+                    StashCapability.store(settings: settings)
+                }
+            }
             if StashCapability.isSupported {
                 let data = try await client.getRawPath("stash")
                 do {
