@@ -13,10 +13,9 @@ struct DayTimelineView: View {
     /// The day to scope to. Defaults to today; a parameter so it stays testable/previewable.
     let day: Date
 
-    /// This child's events of the scoped kind on the scoped day, newest first — filtered
-    /// store-side so the view never materializes the whole table. Also holds the day's records of
-    /// that kind with no child (parent pumping, stash adjustments) and the parents, which
-    /// ``visibleEvents`` sorts out.
+    /// The day's events of the scoped kind, newest first — filtered store-side by kind and day so
+    /// the view never materializes the whole table — plus the parents. ``visibleEvents`` keeps
+    /// this child's records and the childless ones it sees (parent pumping, stash adjustments).
     @Query private var events: [LocalEntity]
     @Query private var cachedTags: [CachedTag]
     @Query(filter: #Predicate<PendingMutation> { $0.dispositionRaw != nil })
@@ -33,9 +32,11 @@ struct DayTimelineView: View {
         let kindRaw = kind.rawValue
         let parentKind = EntityKind.parent.rawValue
         let pendingDelete = SyncState.pendingDelete.rawValue
+        // Not narrowed by child store-side: that clause pushed the predicate past the type-checker's
+        // limit, and ``visibleEvents`` drops other children's records anyway.
         let predicate = #Predicate<LocalEntity> { entity in
             entity.syncStateRaw != pendingDelete
-                && ((entity.kindRaw == kindRaw && (entity.childID == childID || entity.childID == nil)
+                && ((entity.kindRaw == kindRaw
                         && entity.timestamp >= dayStart && entity.timestamp < dayEnd)
                     || (entity.kindRaw == parentKind && entity.childID == nil))
         }
