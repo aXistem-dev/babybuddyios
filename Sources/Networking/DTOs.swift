@@ -291,6 +291,8 @@ struct StashLotDTO: Codable, Equatable {
     var status: StashStatus
     /// True only on the oldest expired lot, the one milk can be thrown away from on its own.
     var is_oldest_expired: Bool?
+    /// Whose milk the lot is: its pumping's parent, or an "added" entry's; nil for neither.
+    var parent: Int? = nil
 }
 
 /// The server's milk stash summary (`GET /api/stash`). The server is authoritative: it runs FIFO

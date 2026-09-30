@@ -176,24 +176,27 @@ struct StashView: View {
         }
     }
 
+    /// A lot: its amount, age, when it went in and, with several parents who produce milk, whose it is.
     private func lotRow(_ lot: StashLotDTO, offersThrowAway: Bool, maxAgeHours: Double) -> some View {
         let amount = EntityFormatting.formatAmount(lot.amount)
         let age = "\(Int(lot.age_hours)) h old"
         let from = lot.time.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        let whose = showsParentNames ? lot.parent.flatMap(parentName) : nil
+        let detail = [age, "from \(from)", whose].compactMap { $0 }.joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(amount).font(.subheadline.weight(.semibold)).monospacedDigit()
-                    Text("\(age) · from \(from)").font(.caption).foregroundStyle(.secondary)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 8)
                 StashStatusChip(status: lot.status)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(amount), \(age), \(lot.status.label)")
+            .accessibilityLabel([amount, age, whose, lot.status.label].compactMap { $0 }.joined(separator: ", "))
             if offersThrowAway {
                 Button {
-                    newEntry = StashEntryPreset.throwAway(lot.throw_away_amount ?? lot.amount, maxAgeHours: maxAgeHours)
+                    newEntry = StashEntryPreset.throwAway(lot: lot, maxAgeHours: maxAgeHours)
                 } label: {
                     Label("Throw away", systemImage: "trash")
                 }

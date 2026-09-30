@@ -152,6 +152,34 @@ final class StashTests: UITestCase {
         expect(app.textFields.matching(NSPredicate(format: "value == %@", "Older than 72 h")).firstMatch)
     }
 
+    /// With a second parent who produces milk (Casey), the pickers show and offer only parents who
+    /// produce milk, never Sam. Lots say whose they are; "Throw away" starts on the lot's parent, and
+    /// a discard explains what its parent changes.
+    func testSeveralMilkParents() {
+        launch(["BB_MILK_PARENTS": "2"])
+        openEditor("Pumping")
+        let pumping = expect(app.navigationBars["New Pumping"])
+        expect(app.staticTexts["Who pumped"])
+        expect(app.buttons["Casey"])
+        expect(app.buttons["Robin"])
+        XCTAssertFalse(app.buttons["Sam"].exists, "Sam doesn't produce milk")
+        tap(pumping.buttons["Cancel"])
+        expectGone(pumping)
+
+        openStash()
+        expect(elements("label CONTAINS 'h old, Casey'").firstMatch)
+        expect(elements("label CONTAINS 'h old, Robin'").firstMatch)
+        tap(app.buttons["Throw away"]) // the oldest expired lot: Robin's
+        expect(app.navigationBars["New Stash adjustment"])
+        expect(app.staticTexts["Whose milk"])
+        XCTAssertTrue(expect(app.buttons["Robin"]).isSelected, "The lot's parent")
+        XCTAssertFalse(app.buttons["Sam"].exists)
+        let caption = "A discard takes this parent's oldest milk first. None: the oldest milk of anyone."
+        expect(app.staticTexts[caption])
+        tap(app.buttons["Added"])
+        expectGone(app.staticTexts[caption])
+    }
+
     /// The 10 ml spilled from a demo bottle is that bottle's: read-only here, with no Save or
     /// Delete, and a way to the bottle.
     func testLinkedDiscardEditsOnItsFeeding() {
