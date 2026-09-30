@@ -101,7 +101,7 @@ struct StashEntryPreset: Identifiable {
 }
 
 extension LocalEntity {
-    /// A discard the server made for a bottle's "Some was discarded". It belongs to that bottle: it
+    /// A discard the server made for a feeding's "Extra milk discarded". It belongs to that bottle: it
     /// is changed or removed there, never repeated or deleted on its own.
     var isLinkedStashDiscard: Bool {
         kind == .stashAdjustment && stashFeedingID != nil
