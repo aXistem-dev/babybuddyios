@@ -454,8 +454,8 @@ struct EntityEditorView: View {
     }
 
     /// A stash entry: milk added to the stash from elsewhere, or discarded, with an optional reason.
-    /// "Whose milk" only when there are several parents to choose from: with one, the server fills
-    /// it in. A bottle's linked discard is shown read-only, with a way to its bottle.
+    /// "Whose milk" only when there are several parents who produce milk to choose from: with one,
+    /// the server fills it in. A bottle's linked discard is shown read-only, with a way to its bottle.
     @ViewBuilder private var stashEntryDetails: some View {
         if let entity, entity.isLinkedStashDiscard {
             linkedStashDetails(entity)
@@ -559,7 +559,7 @@ struct EntityEditorView: View {
         let capable = StashCapability.isSupported
         return BBCard(cornerRadius: BBRadius.tile) {
             VStack(alignment: .leading, spacing: 16) {
-                if capable, !parentChoices.isEmpty {
+                if capable, parentChoices.count >= 2 {
                     fieldLabeled("Who pumped") { parentPicker(parentChoices, none: nil) }
                 }
                 fieldLabeled("Amount") { amountStepper }
@@ -583,20 +583,29 @@ struct EntityEditorView: View {
         .tint(BBColor.brandAccent)
     }
 
-    /// The cached parents by first name, for "Who pumped".
+    /// Every cached parent, whether they produce milk or not.
+    private var allParents: [MilkParents.Parent] { MilkParents.all(in: parents) }
+
+    /// The parent this entry was saved with, which stays on offer even if they no longer produce milk.
+    private var savedParentID: Int? { entity?.payloadObject["parent"] as? Int }
+
+    /// The parents on offer for "Who pumped" and "Whose milk", by first name: those who produce milk.
+    /// Each picker shows only with two or more to choose from.
     private var parentChoices: [(id: Int, name: String)] {
-        parents.compactMap { entity -> (id: Int, name: String)? in
-            guard entity.syncState != .pendingDelete,
-                  let id = (entity.payloadObject["id"] as? Int) ?? entity.serverID else { return nil }
-            return (id: id, name: entity.payloadObject["first_name"] as? String ?? "")
-        }
-        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        MilkParents.choices(allParents, keeping: savedParentID).map { (id: $0.id, name: $0.name) }
     }
 
-    /// The cached parents linked to this child, for "Breastfed by".
+    /// The parents on offer for "Breastfed by": those who produce milk and are linked to this child.
     private var linkedParentChoices: [(id: Int, name: String)] {
-        let linked = EntityVisibility.parentIDs(forChild: childID, in: parents)
-        return parentChoices.filter { linked.contains($0.id) }
+        MilkParents.choices(allParents, keeping: savedParentID)
+            .filter { $0.children.contains(childID) || $0.id == savedParentID }
+            .map { (id: $0.id, name: $0.name) }
+    }
+
+    /// Who pumped: the only parent on offer while the picker is hidden, else the pick.
+    private var pumpingParentID: Int? {
+        let choices = parentChoices
+        return choices.count == 1 ? choices[0].id : parentID
     }
 
     /// A segment per parent, or a menu when there are too many to fit. With a `none` label, a first
@@ -894,7 +903,7 @@ struct EntityEditorView: View {
         return ActivityDraft(kind: kind, start: start, end: end, time: time, date: date,
                              amount: amount, value: value, dosage: dosage,
                              noteText: noteText, medName: medName,
-                             parentID: parentID, requiresParent: capable, hasParents: !parentChoices.isEmpty,
+                             parentID: pumpingParentID, requiresParent: capable, hasParents: !parentChoices.isEmpty,
                              storesInStash: capable && toStash,
                              takesFromStash: capable && fromStash
                                  && Self.isStashFeeding(type: feedingType, method: feedingMethod),
@@ -1190,7 +1199,7 @@ struct EntityEditorView: View {
             p["start"] = iso(start); p["end"] = iso(end)
             if let a = ActivityDraft.number(amount) { p["amount"] = a }
             p["notes"] = notes; p["tags"] = tagList
-            p = Self.pumpingPayload(base: p, parentID: parentID, toStash: toStash,
+            p = Self.pumpingPayload(base: p, parentID: pumpingParentID, toStash: toStash,
                                     storedAmount: ActivityDraft.number(storedAmount),
                                     amount: ActivityDraft.number(amount), capable: StashCapability.isSupported)
         case .note:
@@ -1240,11 +1249,14 @@ struct EntityEditorView: View {
         return p
     }
 
-    /// The parent a new pumping starts on: the only one linked to `child`. With none or several
-    /// it's nil, so the picker starts empty and Save waits for a choice.
+    /// The parent a new pumping or breastfeed starts on, as the server would pick it: the only
+    /// parent who produces milk linked to `child`, else the only parent who produces milk at all.
+    /// Otherwise nil, so the picker starts empty and Save waits for a choice.
     static func defaultParentID(forChild child: Int, in entities: [LocalEntity]) -> Int? {
-        let linked = EntityVisibility.parentIDs(forChild: child, in: entities)
-        return linked.count == 1 ? linked.first : nil
+        let milk = MilkParents.all(in: entities).filter(\.producesMilk)
+        let linked = milk.filter { $0.children.contains(child) }
+        if linked.count == 1 { return linked[0].id }
+        return milk.count == 1 ? milk[0].id : nil
     }
 
     /// The parent a new entry starts on: ``defaultParentID(forChild:in:)``, except that a new stash
@@ -1353,13 +1365,14 @@ struct EntityEditorView: View {
         return [:]
     }
 
-    /// Who breastfed. An edit keeps the picker's value. A new feeding takes the child's only parent
-    /// when the picker is hidden, and otherwise the pick when it's one of the child's parents, never
-    /// one chosen for a pumping before switching kinds.
+    /// Who breastfed. An edit keeps the picker's value. A new feeding takes, while the picker is
+    /// hidden, the child's only parent who produces milk, else the only one there is, and otherwise
+    /// the pick when it's one of the child's parents, never one chosen for a pumping before
+    /// switching kinds.
     private var breastfeedingParentID: Int? {
         if isEditing { return parentID }
         let linked = linkedParentChoices.map { $0.id }
-        if linked.count < 2 { return linked.first }
+        if linked.count < 2 { return linked.first ?? MilkParents.single(allParents)?.id }
         guard let parentID, linked.contains(parentID) else { return nil }
         return parentID
     }

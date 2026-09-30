@@ -114,11 +114,15 @@ enum DemoData {
 
     // MARK: Milk stash
 
-    /// The milk stash, as a server with it would hold it: a parent, Robin, linked to the demo
-    /// child; pumping on Robin put into the stash; breast-milk bottles taken from it, one with some
-    /// spilled; donor milk added, and a discard with no reason. Timed so FIFO leaves one lot about
-    /// 80 h old (expired), one about 50 h old (warn) and two fresh ones, so every lot state and both
-    /// milk age alerts can be seen. ids 4000+ (the parent is 1, the only one).
+    /// The milk stash, as a server with it would hold it: two parents linked to the demo child,
+    /// Robin, who produces milk, and Sam, who doesn't; pumping on Robin put into the stash;
+    /// breast-milk bottles taken from it, one with some spilled; donor milk added, and a discard
+    /// with no reason. Timed so FIFO leaves one lot about 80 h old (expired), one about 50 h old
+    /// (warn) and two fresh ones, so every lot state and both milk age alerts can be seen. ids 4000+
+    /// (the parents are 1 and 2).
+    ///
+    /// `BB_MILK_PARENTS=2` adds Casey (parent 3), a second parent who produces milk, with a session
+    /// in the stash, so the parent pickers show and lots are told apart by parent.
     @MainActor
     private static func seedStash(into context: ModelContext) {
         let now = Date()
@@ -128,8 +132,22 @@ enum DemoData {
 
         insert(.parent, id: 1, [
             "id": 1, "first_name": "Robin", "last_name": "", "slug": "robin",
-            "picture": NSNull(), "children": [1],
+            "picture": NSNull(), "children": [1], "produces_milk": true,
         ], context)
+        insert(.parent, id: 2, [
+            "id": 2, "first_name": "Sam", "last_name": "", "slug": "sam",
+            "picture": NSNull(), "children": [1], "produces_milk": false,
+        ], context)
+        if ProcessInfo.processInfo.environment["BB_MILK_PARENTS"] == "2" {
+            insert(.parent, id: 3, [
+                "id": 3, "first_name": "Casey", "last_name": "", "slug": "casey",
+                "picture": NSNull(), "children": [1], "produces_milk": true,
+            ], context)
+            insert(.pumping, id: 4003, [
+                "id": 4003, "child": NSNull(), "parent": 3, "start": iso(40.33), "end": iso(40),
+                "amount": 50.0, "stash_amount": 50.0, "notes": "", "tags": [],
+            ], context)
+        }
 
         // Pumping on Robin: `child` is null, as the server stores it. The second session keeps
         // 10 ml out of the stash.

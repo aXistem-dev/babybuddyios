@@ -67,6 +67,21 @@ final class StashPayloadTests: XCTestCase {
         XCTAssertNil(EntityEditorView.defaultParentID(forChild: 3, in: [robin, casey, sam]))
     }
 
+    /// Only parents who produce milk are picked, as the server picks them: the child's only one who
+    /// does, else the only one there is. One who doesn't never counts, linked or not.
+    func testDefaultParentProducesMilk() {
+        let robin = parent(1, "Robin", children: [1], producesMilk: true)
+        let sam = parent(2, "Sam", children: [1, 2], producesMilk: false)
+        let casey = parent(3, "Casey", children: [], producesMilk: true)
+        XCTAssertEqual(EntityEditorView.defaultParentID(forChild: 1, in: [robin, sam, casey]), 1,
+                       "Sam is linked to child 1 too, but doesn't produce milk")
+        XCTAssertNil(EntityEditorView.defaultParentID(forChild: 2, in: [robin, sam, casey]),
+                     "Child 2 has no parent who produces milk, and there are two elsewhere")
+        XCTAssertEqual(EntityEditorView.defaultParentID(forChild: 2, in: [robin, sam]), 1,
+                       "The only parent who produces milk, even when not linked")
+        XCTAssertNil(EntityEditorView.defaultParentID(forChild: 1, in: [sam]))
+    }
+
     /// A new stash entry starts on no parent, as on the web: with several parents one is picked,
     /// and nothing is sent until then. Other kinds start on the child's only parent.
     func testNewStashEntryStartsOnNoParent() {
@@ -256,8 +271,9 @@ final class StashPayloadTests: XCTestCase {
                                defaults: .init(pumping_to_stash: true, bottle_from_stash: true))
     }
 
-    private func parent(_ id: Int, _ name: String, children: [Int]) -> LocalEntity {
-        let payload: [String: Any] = ["id": id, "first_name": name, "children": children]
+    private func parent(_ id: Int, _ name: String, children: [Int], producesMilk: Bool? = nil) -> LocalEntity {
+        var payload: [String: Any] = ["id": id, "first_name": name, "children": children]
+        if let producesMilk { payload["produces_milk"] = producesMilk }
         let data = try! JSONSerialization.data(withJSONObject: payload)
         return LocalEntity(kind: .parent, serverID: id, childID: EntityKind.parent.childID(from: payload),
                            timestamp: EntityKind.parent.timestamp(from: payload), payload: data, syncState: .synced)

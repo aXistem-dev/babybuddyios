@@ -256,6 +256,9 @@ struct ParentDTO: APIResource {
     var slug: String?
     var picture: String?
     var children: [Int]
+    /// Whether the parent produces breast milk: only those pump, breastfeed or own stash milk.
+    /// Missing (a server from before the flag) means true, the server's default.
+    var produces_milk: Bool?
 }
 
 struct StashAdjustmentDTO: APIResource {
