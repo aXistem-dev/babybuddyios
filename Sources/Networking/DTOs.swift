@@ -61,7 +61,7 @@ enum StashStatus: String, Codable {
     var label: String {
         switch self {
         case .ok: return "Fresh"
-        case .warn: return "Use first"
+        case .warn: return "Expiring soon"
         case .expired: return "Expired"
         }
     }
@@ -324,9 +324,9 @@ struct StashSettingsDTO: Codable, Equatable {
     var pumping_to_stash: Bool
     /// Whether new breast-milk bottles start "Taken from stash", once the stash is in use.
     var bottle_from_stash: Bool
-    /// Hours after which milk is marked to use first; always below `max_age_hours`.
+    /// Hours after which milk is marked as expiring soon; always below `max_age_hours`.
     var warn_age_hours: Int
-    /// Hours after which milk is marked to throw away.
+    /// Hours after which milk has expired and should be thrown away.
     var max_age_hours: Int
     var can_edit: Bool
 }

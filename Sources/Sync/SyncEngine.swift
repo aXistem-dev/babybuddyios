@@ -525,7 +525,7 @@ final class SyncEngine {
         if session.isDemo {
             DemoData.seedIfNeeded(into: context)
             // The seed refreshes the cached stash summary on every demo pull, but a demo pull
-            // reports no change, so `sync()` wouldn't reconcile after it: the milk age alerts
+            // reports no change, so `sync()` wouldn't reconcile after it: the milk stash expiry alerts
             // catch up here.
             await LocalAlerts.shared.reconcile()
             lastSyncDate = .now

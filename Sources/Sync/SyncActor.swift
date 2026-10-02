@@ -109,7 +109,7 @@ actor SyncActor {
     /// it does, the cached stash summary. Never fails the sync: a network or HTTP error keeps what
     /// was cached, and a summary that doesn't decode is reported and cleared.
     /// Returns whether either changed, so the pull counts as a change and what shows the stash
-    /// (the stash card, the milk age alerts) refreshes.
+    /// (the stash card, the expiry alerts) refreshes.
     private func refreshStash(client: APIClient) async -> Bool {
         let wasSupported = StashCapability.isSupported
         let hadEvents = EventsCapability.isSupported

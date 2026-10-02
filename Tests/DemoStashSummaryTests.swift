@@ -4,7 +4,7 @@ import SwiftData
 
 #if DEBUG
 /// Demo mode has no server, so it computes the stash summary itself. It has to agree with the
-/// server's FIFO, or the stash screens and milk age alerts would be exercised against numbers no
+/// server's FIFO, or the stash screens and expiry alerts would be exercised against numbers no
 /// real server returns.
 @MainActor
 final class DemoStashSummaryTests: XCTestCase {
@@ -133,7 +133,7 @@ final class DemoStashSummaryTests: XCTestCase {
     }
 
     /// The demo seed turns the stash on and leaves one lot to warn about and one expired, so both
-    /// lot states and both milk age alerts can be seen in demo mode.
+    /// lot states and both expiry alerts can be seen in demo mode.
     func testDemoSeedShowsWarnAndExpiredLots() throws {
         let container = LocalStore.makeContainer(inMemory: true)
         DemoData.seedIfNeeded(into: container.mainContext)
