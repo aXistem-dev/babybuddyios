@@ -69,9 +69,9 @@ final class EventsTests: XCTestCase {
     /// and tags on every one; one type makes one.
     func testPayloadsShareTheirTime() {
         let time = iso(0)
-        let two = EntityEditorView.eventPayloads(child: 1, types: ["nail-trim", "bath"], time: time,
+        let two = EntityEditorView.eventPayloads(child: 1, types: ["nail-trim", "massage"], time: time,
                                                  notes: "Before bed", tags: ["night"])
-        XCTAssertEqual(two.map { $0["type"] as? String }, ["bath", "nail-trim"], "Sorted by slug")
+        XCTAssertEqual(two.map { $0["type"] as? String }, ["massage", "nail-trim"], "Sorted by slug")
         for p in two {
             XCTAssertEqual(p["child"] as? Int, 1)
             XCTAssertEqual(p["time"] as? String, time)
@@ -79,7 +79,7 @@ final class EventsTests: XCTestCase {
             XCTAssertEqual(p["tags"] as? [String], ["night"])
         }
 
-        let one = EntityEditorView.eventPayloads(child: 2, types: ["bath"], time: time, notes: "", tags: [])
+        let one = EntityEditorView.eventPayloads(child: 2, types: ["massage"], time: time, notes: "", tags: [])
         XCTAssertEqual(one.count, 1)
         XCTAssertEqual(one.first?["child"] as? Int, 2)
         XCTAssertTrue(EntityEditorView.eventPayloads(child: 1, types: [], time: time, notes: "", tags: []).isEmpty)
@@ -102,12 +102,12 @@ final class EventsTests: XCTestCase {
     /// The editor lists the cached types by name, leaves out deleted ones, and keeps an edited
     /// event's own type (by its slug) when this phone hasn't synced it.
     func testTypeChoices() {
-        let records = [type(1, "Nail trim", "nail-trim"), type(2, "Bath", "bath"),
+        let records = [type(1, "Nail trim", "nail-trim"), type(2, "Massage", "massage"),
                        type(3, "Gone", "gone", state: .pendingDelete)]
-        XCTAssertEqual(EntityEditorView.eventTypeChoices(records, keeping: nil).map(\.slug), ["bath", "nail-trim"])
+        XCTAssertEqual(EntityEditorView.eventTypeChoices(records, keeping: nil).map(\.slug), ["massage", "nail-trim"])
         XCTAssertEqual(EntityEditorView.eventTypeChoices(records, keeping: "unsynced").map(\.slug),
-                       ["bath", "nail-trim", "unsynced"])
-        XCTAssertEqual(EntityEditorView.eventTypeChoices(records, keeping: "bath").count, 2)
+                       ["massage", "nail-trim", "unsynced"])
+        XCTAssertEqual(EntityEditorView.eventTypeChoices(records, keeping: "massage").count, 2)
     }
 
     // MARK: Capability
@@ -117,15 +117,15 @@ final class EventsTests: XCTestCase {
     func testCapability() {
         EventsCapability.update(rootJSON: Data(#"{"event-types": "x", "events": "x"}"#.utf8))
         XCTAssertTrue(EventsCapability.isSupported)
-        EventsCapability.store(typesIn: [type(1, "Bath", "bath"), type(2, "Gone", "gone", state: .pendingDelete)])
-        XCTAssertEqual(EventsCapability.typeNames, ["bath": "Bath"])
+        EventsCapability.store(typesIn: [type(1, "Massage", "massage"), type(2, "Gone", "gone", state: .pendingDelete)])
+        XCTAssertEqual(EventsCapability.typeNames, ["massage": "Massage"])
 
         EventsCapability.update(rootJSON: Data(#"{"events": "x"}"#.utf8))
         XCTAssertFalse(EventsCapability.isSupported)
         XCTAssertTrue(EventsCapability.typeNames.isEmpty)
 
         EventsCapability.update(rootJSON: Data(#"{"event-types": "x", "events": "x"}"#.utf8))
-        EventsCapability.store(typesIn: [type(1, "Bath", "bath")])
+        EventsCapability.store(typesIn: [type(1, "Massage", "massage")])
         EventsCapability.reset()
         XCTAssertFalse(EventsCapability.isSupported)
         XCTAssertTrue(EventsCapability.typeNames.isEmpty)
@@ -133,25 +133,140 @@ final class EventsTests: XCTestCase {
 
     /// A row names an event by its type; a type this phone doesn't know yet by its slug.
     func testEventTitle() {
-        EventsCapability.store(typeNames: ["bath": "Bath"])
-        XCTAssertEqual(EntityFormatting.title(event("bath", hoursAgo: 1)), "Bath")
+        EventsCapability.store(typeNames: ["massage": "Massage"])
+        XCTAssertEqual(EntityFormatting.title(event("massage", hoursAgo: 1)), "Massage")
         XCTAssertEqual(EntityFormatting.title(event("unknown-type", hoursAgo: 1)), "unknown-type")
         XCTAssertEqual(EntityFormatting.title(entity(.event, ["child": 1, "time": iso(1)])), "Event")
         XCTAssertEqual(EntityFormatting.title(entity(.note, ["child": 1, "time": iso(1)])), "Note")
     }
 
-    // MARK: Time since last
+    // MARK: v2: last events and most used
 
-    /// The newest event of each type, for this child only; deleted events don't count.
-    func testLastTimesPerType() {
-        let last = EventsCapability.lastTimes(in: [
-            event("bath", hoursAgo: 50), event("bath", hoursAgo: 26), event("nail-trim", hoursAgo: 26),
-            event("bath", hoursAgo: 2, child: 2), event("nail-trim", hoursAgo: 1, state: .pendingDelete),
-            entity(.note, ["child": 1, "time": iso(0)]),
-        ], child: 1)
-        XCTAssertEqual(last["bath"], now.addingTimeInterval(-26 * 3600))
-        XCTAssertEqual(last["nail-trim"], now.addingTimeInterval(-26 * 3600))
-        XCTAssertNil(last["outfit"], "Never")
-        XCTAssertEqual(last.count, 2)
+    private func choice(_ slug: String, _ name: String) -> EntityEditorView.EventTypeChoice {
+        .init(slug: slug, name: name)
+    }
+
+    /// Home shows the child's 5 newest events, newest first; a type can come up more than once, and
+    /// other children's and deleted events don't count.
+    func testLastEvents() {
+        let events = [event("massage", hoursAgo: 50), event("massage", hoursAgo: 26), event("nail-trim", hoursAgo: 26),
+                      event("outfit", hoursAgo: 3), event("massage", hoursAgo: 1), event("hair", hoursAgo: 70),
+                      event("massage", hoursAgo: 0.5, child: 2), event("hair", hoursAgo: 0.2, state: .pendingDelete),
+                      entity(.note, ["child": 1, "time": iso(0.1)])]
+        let last = EventUsage.lastEvents(events, child: 1)
+        XCTAssertEqual(last.map { $0.payloadObject["type"] as? String }, ["massage", "outfit", "massage", "nail-trim", "massage"])
+        XCTAssertEqual(last.first?.timestamp, now.addingTimeInterval(-3600))
+        XCTAssertTrue(EventUsage.lastEvents(events, child: 3).isEmpty)
+    }
+
+    /// The most used types for the child over the last 30 days come first; a tie goes to the most
+    /// recent use, then the name; unused types fill up to 5 by name; older events, other children's
+    /// and deleted ones don't count.
+    func testTopTypes() {
+        let types = [choice("massage", "Massage"), choice("nail", "Nail trim"), choice("outfit", "Outfit change"),
+                     choice("teeth", "Tooth brushing"), choice("sun", "Sunscreen"), choice("hair", "Haircut")]
+        let events = [
+            event("massage", hoursAgo: 50), event("massage", hoursAgo: 26),        // massage: 2
+            event("nail", hoursAgo: 26), event("outfit", hoursAgo: 3),       // tie at 1: outfit is newer
+            event("teeth", hoursAgo: 24 * 31), event("teeth", hoursAgo: 24 * 40), // older than 30 days
+            event("sun", hoursAgo: 1, child: 2), event("sun", hoursAgo: 2, child: 2), // another child
+            event("hair", hoursAgo: 1, state: .pendingDelete),               // being deleted
+        ]
+        let top = EventUsage.topTypes(events: events, types: types, child: 1, now: now)
+        XCTAssertEqual(top.map(\.slug), ["massage", "outfit", "nail", "hair", "sun"])
+        XCTAssertEqual(EventUsage.topTypes(events: events, types: types, child: 1, now: now, limit: 2).map(\.slug),
+                       ["massage", "outfit"])
+
+        // Same count and same last use: by name.
+        let same = [event("sun", hoursAgo: 5), event("hair", hoursAgo: 5)]
+        XCTAssertEqual(EventUsage.topTypes(events: same, types: types, child: 1, now: now, limit: 2).map(\.slug),
+                       ["hair", "sun"])
+        // Nothing used: the first 5 by name.
+        XCTAssertEqual(EventUsage.topTypes(events: [], types: types, child: 1, now: now).map(\.slug),
+                       ["hair", "massage", "nail", "outfit", "sun"])
+    }
+
+    // MARK: v2: emoji and permissions
+
+    /// A type's emoji decodes when the server sends it, and is simply absent on an older server.
+    func testEmojiDecodes() throws {
+        let v2 = try APICoders.decoder.decode(EventTypeDTO.self, from: Data("""
+        {"id": 1, "name": "Massage", "slug": "massage", "emoji": "\u{1F486}"}
+        """.utf8))
+        XCTAssertEqual(v2.emoji, "\u{1F486}")
+        let v1 = try APICoders.decoder.decode(EventTypeDTO.self, from: Data("""
+        {"id": 1, "name": "Massage", "slug": "massage"}
+        """.utf8))
+        XCTAssertNil(v1.emoji)
+    }
+
+    /// The type list's `permissions`, as the server says them; all false without the key (an older
+    /// server) or when they can't be read.
+    func testPermissionsFromList() {
+        let list = Data(#"""
+        {"count": 1, "next": null, "previous": null,
+         "permissions": {"add": true, "change": true, "delete": false},
+         "results": [{"id": 1, "name": "Massage", "slug": "massage", "emoji": ""}]}
+        """#.utf8)
+        XCTAssertEqual(EventsCapability.permissions(fromListJSON: list),
+                       .init(add: true, change: true, delete: false))
+        let older = Data(#"{"count": 0, "next": null, "previous": null, "results": []}"#.utf8)
+        XCTAssertEqual(EventsCapability.permissions(fromListJSON: older), .init())
+        XCTAssertFalse(EventsCapability.permissions(fromListJSON: older).any)
+        XCTAssertEqual(EventsCapability.permissions(fromListJSON: Data("not json".utf8)), .init())
+    }
+
+    /// Emoji are cached by slug with the names; an event shows its type's, and a type without one
+    /// (or a record that isn't an event) has none. Sign-out forgets them and the permissions.
+    func testEmojiCacheAndReset() {
+        EventsCapability.update(rootJSON: Data(#"{"event-types": "x", "events": "x"}"#.utf8))
+        EventsCapability.store(typesIn: [
+            entity(.eventType, ["id": 1, "name": "Massage", "slug": "massage", "emoji": "\u{1F486}"]),
+            entity(.eventType, ["id": 2, "name": "Nail trim", "slug": "nail-trim", "emoji": ""]),
+        ])
+        EventsCapability.store(permissions: .init(add: true, change: false, delete: false))
+        XCTAssertEqual(EventsCapability.emoji(forSlug: "massage"), "\u{1F486}")
+        XCTAssertNil(EventsCapability.emoji(forSlug: "nail-trim"))
+        XCTAssertEqual(event("massage", hoursAgo: 1).eventEmoji, "\u{1F486}")
+        XCTAssertNil(event("nail-trim", hoursAgo: 1).eventEmoji)
+        XCTAssertNil(entity(.note, ["child": 1, "time": iso(1)]).eventEmoji)
+        XCTAssertTrue(EventsCapability.permissions.add)
+
+        EventsCapability.reset()
+        XCTAssertNil(EventsCapability.emoji(forSlug: "massage"))
+        XCTAssertEqual(EventsCapability.permissions, .init())
+    }
+
+    // MARK: v2: managing types
+
+    /// A name is needed, and at most 100 characters (the server's limit).
+    func testTypeNameRules() {
+        XCTAssertEqual(EventTypeEdit.nameProblem("  "), "Enter a name.")
+        XCTAssertNil(EventTypeEdit.nameProblem(" Massage "))
+        XCTAssertNil(EventTypeEdit.nameProblem(String(repeating: "a", count: 100)))
+        XCTAssertNotNil(EventTypeEdit.nameProblem(String(repeating: "a", count: 101)))
+    }
+
+    /// One emoji or none: a `Character` is a whole grapheme, so an emoji made of several code points
+    /// (a variation selector, a flag, a family, a skin tone) still counts as one.
+    func testEmojiIsOneCharacter() {
+        for ok in ["", " ", "\u{1F486}", "\u{2702}\u{FE0F}", "\u{1F1E7}\u{1F1EA}",
+                   "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", "\u{1F44D}\u{1F3FD}"] {
+            XCTAssertTrue(EventTypeEdit.emojiIsValid(ok), ok)
+        }
+        XCTAssertFalse(EventTypeEdit.emojiIsValid("\u{1F486}\u{1F486}"))
+        XCTAssertFalse(EventTypeEdit.emojiIsValid("ab"))
+    }
+
+    /// An edit sends only what changed, trimmed; the slug is never part of it.
+    func testTypeChanges() {
+        let current: [String: Any] = ["id": 1, "name": "Massage", "slug": "massage", "emoji": ""]
+        XCTAssertTrue(EventTypeEdit.changes(of: current, name: " Massage ", emoji: "").isEmpty)
+        let renamed = EventTypeEdit.changes(of: current, name: "Evening massage", emoji: "")
+        XCTAssertEqual(renamed.count, 1)
+        XCTAssertEqual(renamed["name"] as? String, "Evening massage")
+        let emoji = EventTypeEdit.changes(of: current, name: "Massage", emoji: "\u{1F486}")
+        XCTAssertEqual(emoji["emoji"] as? String, "\u{1F486}")
+        XCTAssertNil(emoji["slug"])
     }
 }

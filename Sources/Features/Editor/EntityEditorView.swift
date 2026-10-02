@@ -464,7 +464,7 @@ struct EntityEditorView: View {
     }
 
     /// What happened: a row per cached event type. While creating, several can be ticked, and each
-    /// becomes its own event at the same time (a bath and a nail trim together); an edit has one.
+    /// becomes its own event at the same time (a massage and a nail trim together); an edit has one.
     private var eventDetails: some View {
         let choices = eventTypeChoices
         return BBCard(cornerRadius: BBRadius.tile, padding: 0) {
@@ -495,6 +495,9 @@ struct EntityEditorView: View {
             }
         } label: {
             HStack(spacing: 12) {
+                if let emoji = type.emoji {
+                    Text(emoji).font(.body).accessibilityHidden(true)
+                }
                 Text(type.name).font(.body).foregroundStyle(.primary)
                 Spacer(minLength: 8)
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
@@ -509,10 +512,11 @@ struct EntityEditorView: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// An event type on offer: its slug (what an event stores) and its name.
+    /// An event type on offer: its slug (what an event stores), its name and its emoji, if any.
     struct EventTypeChoice: Equatable {
         let slug: String
         let name: String
+        var emoji: String? = nil
     }
 
     /// The cached event types by name, and an edited event's own type even if this phone hasn't
@@ -526,7 +530,8 @@ struct EntityEditorView: View {
             guard entity.kind == .eventType, entity.syncState != .pendingDelete,
                   let slug = entity.payloadObject["slug"] as? String, !slug.isEmpty else { return nil }
             let name = entity.payloadObject["name"] as? String ?? ""
-            return EventTypeChoice(slug: slug, name: name.isEmpty ? slug : name)
+            let emoji = entity.payloadObject["emoji"] as? String ?? ""
+            return EventTypeChoice(slug: slug, name: name.isEmpty ? slug : name, emoji: emoji.isEmpty ? nil : emoji)
         }
         .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         if let current, !choices.contains(where: { $0.slug == current }) {

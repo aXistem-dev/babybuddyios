@@ -222,6 +222,25 @@ final class APIClient {
         return try await sendRaw(req)
     }
 
+    /// PATCH a record addressed by a lookup that isn't its numeric id (an event type's slug).
+    func patchRaw(path: String, lookup: String, body: Data) async throws -> Data {
+        guard Self.isSafeLookup(lookup) else { throw APIError.invalidURL }
+        var req = try makeRequest(path: "\(path)/\(lookup)/", method: "PATCH")
+        req.httpBody = body
+        return try await sendRaw(req)
+    }
+
+    /// DELETE a record addressed by its lookup. A 409 (the record is still in use) comes back as
+    /// `.badRequest(status: 409, message:)`, so the server's reason can be shown as it is.
+    func deleteRaw(path: String, lookup: String) async throws {
+        guard Self.isSafeLookup(lookup) else { throw APIError.invalidURL }
+        let (data, http) = try await fetch(try makeRequest(path: "\(path)/\(lookup)/", method: "DELETE"))
+        if http.statusCode == 409 {
+            throw APIError.badRequest(status: 409, message: Self.errorMessage(from: data), fields: [])
+        }
+        _ = try check(data, http)
+    }
+
     func createRaw(path: String, body: Data) async throws -> Data {
         var req = try makeRequest(path: "\(path)/", method: "POST")
         req.httpBody = body

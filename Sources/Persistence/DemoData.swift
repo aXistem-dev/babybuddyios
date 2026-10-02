@@ -119,21 +119,28 @@ enum DemoData {
 
     // MARK: Events
 
-    /// Events, as a server with them would hold them: three event types, and events of them for the
-    /// demo child, among them a bath and a nail trim logged together at the identical time (one
-    /// event per type, as the app logs several at once). ids 5000+ (types 1–3).
+    /// Events, as a server with them would hold them: six event types, five with an emoji, and
+    /// events of three of them for the demo child, among them a massage and a nail trim logged together
+    /// at the identical time (one event per type, as the app logs several at once). ids 5000+
+    /// (types 1–6).
     @MainActor
     private static func seedEvents(into context: ModelContext) {
         let now = Date()
         func iso(_ hoursAgo: Double) -> String {
             APIDate.isoDateTime.string(from: now.addingTimeInterval(-hoursAgo * 3600))
         }
-        for (id, name, slug) in [(1, "Bath", "bath"), (2, "Nail trim", "nail-trim"),
-                                 (3, "Outfit change", "outfit-change")] {
-            insert(.eventType, id: id, ["id": id, "name": name, "slug": slug], context)
+        // Outfit change has no emoji, so the symbol it falls back to shows too. Six types, so the
+        // Add Activity sheet's top five leaves one out.
+        for (id, name, slug, emoji) in [(1, "Massage", "massage", "\u{1F486}"),
+                                        (2, "Nail trim", "nail-trim", "\u{2702}\u{FE0F}"),
+                                        (3, "Outfit change", "outfit-change", ""),
+                                        (4, "Tooth brushing", "tooth-brushing", "\u{1FAA5}"),
+                                        (5, "Sunscreen", "sunscreen", "\u{1F9F4}"),
+                                        (6, "Haircut", "haircut", "\u{1F488}")] {
+            insert(.eventType, id: id, ["id": id, "name": name, "slug": slug, "emoji": emoji], context)
         }
         let together = iso(26)
-        for (id, type, time) in [(5000, "bath", iso(50)), (5001, "bath", together),
+        for (id, type, time) in [(5000, "massage", iso(50)), (5001, "massage", together),
                                  (5002, "nail-trim", together), (5003, "outfit-change", iso(3))] {
             insert(.event, id: id, [
                 "id": id, "child": 1, "type": type, "time": time, "notes": "", "tags": [],
@@ -141,8 +148,45 @@ enum DemoData {
         }
     }
 
-    /// Demo mode's stand-in for what a sync learns about events from `GET /api/`, and the cached
-    /// event types' names. `BB_NO_EVENTS=1` runs the demo as a server without events.
+    /// Demo mode's `POST /api/event-types/`: a new type with the next id and a slug made from its
+    /// name, as the server makes one.
+    @MainActor
+    static func createDemoEventType(name: String, emoji: String, in context: ModelContext) {
+        let kind = EntityKind.eventType.rawValue
+        let types = (try? context.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let id = (types.compactMap(\.serverID).max() ?? 0) + 1
+        let slug = name.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }.joined(separator: "-")
+        insert(.eventType, id: id, ["id": id, "name": name, "slug": slug.isEmpty ? "type-\(id)" : slug,
+                                    "emoji": emoji], context)
+    }
+
+    /// Demo mode's `PATCH /api/event-types/<slug>/`: the changed name or emoji; the slug stays.
+    @MainActor
+    static func updateDemoEventType(_ type: LocalEntity, with changes: [String: Any], in context: ModelContext) {
+        var p = type.payloadObject
+        for (key, value) in changes { p[key] = value }
+        if let id = type.serverID { insert(.eventType, id: id, p, context) }
+    }
+
+    /// Demo mode's `DELETE /api/event-types/<slug>/`. Like the server, it refuses a type events use.
+    @MainActor
+    static func deleteDemoEventType(_ type: LocalEntity, in context: ModelContext) throws {
+        let slug = type.payloadObject["slug"] as? String
+        let kind = EntityKind.event.rawValue
+        let events = (try? context.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        if events.contains(where: { $0.payloadObject["type"] as? String == slug }) {
+            throw APIError.badRequest(status: 409,
+                                      message: "This event type is used by events and can not be deleted.", fields: [])
+        }
+        context.delete(type)
+    }
+
+    /// Demo mode's stand-in for what a sync learns about events from `GET /api/`, the cached event
+    /// types' names and emoji, and what this user may do with event types: everything, unless
+    /// `BB_EVENT_TYPES_READONLY=1`. `BB_NO_EVENTS=1` runs the demo as a server without events.
     @MainActor
     private static func refreshDemoEvents(in context: ModelContext) {
         guard ProcessInfo.processInfo.environment["BB_NO_EVENTS"] != "1" else {
@@ -154,6 +198,8 @@ enum DemoData {
         let types = (try? context.fetch(FetchDescriptor<LocalEntity>(
             predicate: #Predicate { $0.kindRaw == kind }))) ?? []
         EventsCapability.store(typesIn: types)
+        let manages = ProcessInfo.processInfo.environment["BB_EVENT_TYPES_READONLY"] != "1"
+        EventsCapability.store(permissions: .init(add: manages, change: manages, delete: manages))
     }
 
     // MARK: Milk stash
