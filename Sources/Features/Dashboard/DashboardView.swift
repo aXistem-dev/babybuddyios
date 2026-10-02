@@ -162,8 +162,6 @@ struct DashboardView: View {
 
                         todaySection
                         if stash.isSupported { stashCard }
-                        let lastEvents = eventsSupported ? EventUsage.lastEvents(childEntities, child: selectedChildID) : []
-                        if !lastEvents.isEmpty { lastEventsCard(lastEvents) }
                         if !latestEvents.isEmpty { latestSection }
                     }
                 }
@@ -599,41 +597,6 @@ struct DashboardView: View {
         EntityEditorView.eventTypeChoices(eventTypeRecords, keeping: nil)
     }
 
-    /// This child's most recent events, newest first, each with how long ago it was; a row opens
-    /// the event.
-    private func lastEventsCard(_ events: [LocalEntity]) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            SectionHeader("Last events")
-            BBCard(cornerRadius: BBRadius.tile, padding: 0) {
-                VStack(spacing: 0) {
-                    ForEach(Array(events.enumerated()), id: \.element.localID) { index, event in
-                        if index > 0 {
-                            Rectangle().fill(BBColor.divider).frame(height: 0.5).padding(.leading, 15)
-                        }
-                        lastEventRow(event)
-                    }
-                }
-            }
-        }
-    }
-
-    private func lastEventRow(_ event: LocalEntity) -> some View {
-        let name = EntityFormatting.title(event)
-        let when = event.timestamp.formatted(.relative(presentation: .named))
-        return Button { editing = event } label: {
-            HStack(spacing: 12) {
-                ActivityTile(kind: .event, size: 30, glyph: 17, emoji: event.eventEmoji)
-                Text(name).font(.body).foregroundStyle(.primary)
-                Spacer(minLength: 8)
-                Text(when).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
-            }
-            .padding(.horizontal, 15).padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(name), \(when)") // a Button is one element already
-    }
-
     /// One tap in the Add Activity sheet: this event type, for the selected child, now. Queued like
     /// any other record, so it works offline and can be undone from the toast.
     private func logEvent(_ slug: String) {
@@ -879,8 +842,10 @@ struct DashboardView: View {
         childEntities.first { $0.kind == kind }
     }
 
+    /// The newest record of each kind, events too on a server with them, newest first.
     private var latestEvents: [LocalEntity] {
-        recentKinds.compactMap { lastEvent(of: $0) }.sorted { $0.timestamp > $1.timestamp }
+        (recentKinds + (eventsSupported ? [.event] : []))
+            .compactMap { lastEvent(of: $0) }.sorted { $0.timestamp > $1.timestamp }
     }
 
     /// The newest dose of each medication whose next dose is still ahead, soonest first.

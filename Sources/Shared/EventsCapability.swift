@@ -89,6 +89,10 @@ enum EventsCapability {
         }
     }
 
+    /// The type list's route, with the trailing slash the server's router expects. Without it the
+    /// server redirects, and the redirect drops the token, so the request is refused.
+    static let typeListPath = EntityKind.eventType.path + "/"
+
     /// The `permissions` object of a `GET /api/event-types/` page (the same on every page); all
     /// false when it's missing (an older server) or unreadable.
     static func permissions(fromListJSON data: Data) -> Permissions {

@@ -479,6 +479,22 @@ struct EntityEditorView: View {
                     if index > 0 { rowDivider }
                     eventTypeRow(type)
                 }
+                // For a user the server lets manage event types: the way there, where it's needed.
+                if EventsCapability.permissions.any {
+                    rowDivider
+                    NavigationLink { EventTypesView() } label: {
+                        HStack {
+                            Label("Manage event types", systemImage: "tag")
+                                .font(.body).foregroundStyle(BBColor.brandAccent)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 15).padding(.vertical, 11)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
     }

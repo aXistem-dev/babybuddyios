@@ -545,6 +545,11 @@ private struct TimelineFiltersView: View {
                         }
                     }
                 }
+                if kindFilter == .event, EventsCapability.permissions.any {
+                    Section {
+                        NavigationLink("Manage event types") { EventTypesView() }
+                    }
+                }
                 Section("Date Range") {
                     dateBound(label: "From", date: $dateFrom, default: defaultFrom)
                     dateBound(label: "To", date: $dateTo, default: Calendar.current.startOfDay(for: .now))
