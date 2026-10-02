@@ -84,6 +84,8 @@ Pass these via `SIMCTL_CHILD_<NAME>` environment variables to `xcrun simctl laun
 | `BB_NO_STASH=1` | With `BB_DEMO`, behave like a server without the milk stash: no stash data, screen or alerts |
 | `BB_MILK_PARENTS=2` | With `BB_DEMO`, add a second parent who produces milk, so the parent pickers show and lots name their parent |
 | `BB_NO_EVENTS=1` | With `BB_DEMO`, behave like a server without events: no event types, events or event UI |
+| `BB_EVENT_TYPES_READONLY=1` | With `BB_DEMO`, a user who may not add, change or delete event types: no Event types screen |
+| `BB_STASH_SETTINGS_READONLY=1` | With `BB_DEMO`, a user who may see but not change Settings ▸ Milk stash |
 | `BB_TOAST_SECONDS=<n>` | Hold the undo toast open for `n` seconds instead of 5 |
 
 `BB_DEMO=1` is the fastest way to see the app without standing up a server — it seeds a child,

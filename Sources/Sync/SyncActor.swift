@@ -80,20 +80,29 @@ actor SyncActor {
             return Self.fail(serverError, endpoint: "all", changed: changed)
         }
         if await refreshStash(client: client) { changed = true }
-        if refreshEventTypeNames() { changed = true }
+        if await refreshEventTypes(client: client) { changed = true }
         return PullOutcome(error: nil, changed: changed)
     }
 
-    /// Cache the pulled event types' names by slug, for the rows that name an event (see
-    /// ``EventsCapability``). Returns whether they changed, so a rename shows without new events.
-    private func refreshEventTypeNames() -> Bool {
-        let before = EventsCapability.typeNames
+    /// Cache the pulled event types' names and emoji by slug, for the rows that show an event, and
+    /// what this user may do with event types (the `permissions` of the type list's first page). See
+    /// ``EventsCapability``. Returns whether any of it changed, so a rename shows without new events.
+    private func refreshEventTypes(client: APIClient) async -> Bool {
         guard EventsCapability.isSupported else { return false }
+        let names = EventsCapability.typeNames
+        let emoji = EventsCapability.typeEmoji
+        let permissions = EventsCapability.permissions
         let kind = EntityKind.eventType.rawValue
         let types = (try? modelContext.fetch(FetchDescriptor<LocalEntity>(
             predicate: #Predicate { $0.kindRaw == kind }))) ?? []
         EventsCapability.store(typesIn: types)
-        return EventsCapability.typeNames != before
+        // A failed request keeps the permissions this phone last had.
+        if let page = try? await client.getRawPath(EntityKind.eventType.path) {
+            EventsCapability.store(permissions: EventsCapability.permissions(fromListJSON: page))
+        }
+        return EventsCapability.typeNames != names
+            || EventsCapability.typeEmoji != emoji
+            || EventsCapability.permissions != permissions
     }
 
     /// Refresh whether the server has the milk stash (its API root lists the stash routes) and, if

@@ -401,7 +401,7 @@ struct TimelineRailRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
-            RailNode(kind: entity.kind, connectsDown: connectsDown)
+            RailNode(kind: entity.kind, emoji: entity.eventEmoji, connectsDown: connectsDown)
             card.padding(.bottom, 9)
         }
         .padding(.horizontal, 16)
@@ -489,12 +489,14 @@ private struct RailNode: View {
     // clipping the glyph at large accessibility text sizes.
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
     let kind: EntityKind
+    /// An event type's emoji, drawn instead of the glyph.
+    var emoji: String? = nil
     let connectsDown: Bool
 
     private var columnWidth: CGFloat { 40 * min(typeScale, 1.6) }
 
     var body: some View {
-        ActivityTile(kind: kind, size: 38, glyph: 20)
+        ActivityTile(kind: kind, size: 38, glyph: 20, emoji: emoji)
             .padding(.top, 5)
             .frame(width: columnWidth, alignment: .top)
             .frame(maxHeight: .infinity, alignment: .top)

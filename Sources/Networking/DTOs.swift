@@ -268,6 +268,8 @@ struct EventTypeDTO: APIResource {
     var id: Int?
     var name: String
     var slug: String
+    /// One emoji shown as the type's icon; `""` when unset, and absent on an older server.
+    var emoji: String?
 }
 
 /// Something that happened to a child, of one event type: `type` is that type's slug.

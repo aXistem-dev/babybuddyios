@@ -162,7 +162,8 @@ struct DashboardView: View {
 
                         todaySection
                         if stash.isSupported { stashCard }
-                        if eventsSupported, !eventTypes.isEmpty { lastEventsCard }
+                        let lastEvents = eventsSupported ? EventUsage.lastEvents(childEntities, child: selectedChildID) : []
+                        if !lastEvents.isEmpty { lastEventsCard(lastEvents) }
                         if !latestEvents.isEmpty { latestSection }
                     }
                 }
@@ -202,7 +203,10 @@ struct DashboardView: View {
             }) {
                 AllActivitiesSheet(
                     showsSickMode: sickModeStart == nil,
-                    eventTypes: eventsSupported ? eventTypes : [],
+                    eventTypes: eventsSupported
+                        ? EventUsage.topTypes(events: childEntities, types: eventTypes,
+                                              child: selectedChildID, now: .now)
+                        : [],
                     onLogEvent: { slug in
                         showAllActivities = false
                         logEvent(slug)
@@ -595,36 +599,39 @@ struct DashboardView: View {
         EntityEditorView.eventTypeChoices(eventTypeRecords, keeping: nil)
     }
 
-    /// Each event type with how long ago this child last had one, or "never".
-    private var lastEventsCard: some View {
-        let last = EventsCapability.lastTimes(in: childEntities, child: selectedChildID)
-        let types = eventTypes
-        return VStack(alignment: .leading, spacing: 9) {
+    /// This child's most recent events, newest first, each with how long ago it was; a row opens
+    /// the event.
+    private func lastEventsCard(_ events: [LocalEntity]) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
             SectionHeader("Last events")
             BBCard(cornerRadius: BBRadius.tile, padding: 0) {
                 VStack(spacing: 0) {
-                    ForEach(Array(types.enumerated()), id: \.element.slug) { index, type in
+                    ForEach(Array(events.enumerated()), id: \.element.localID) { index, event in
                         if index > 0 {
                             Rectangle().fill(BBColor.divider).frame(height: 0.5).padding(.leading, 15)
                         }
-                        lastEventRow(type, at: last[type.slug])
+                        lastEventRow(event)
                     }
                 }
             }
         }
     }
 
-    private func lastEventRow(_ type: EntityEditorView.EventTypeChoice, at time: Date?) -> some View {
-        let when = time.map { $0.formatted(.relative(presentation: .named)) } ?? "never"
-        return HStack(spacing: 12) {
-            ActivityTile(kind: .event, size: 30, glyph: 17)
-            Text(type.name).font(.body)
-            Spacer(minLength: 8)
-            Text(when).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+    private func lastEventRow(_ event: LocalEntity) -> some View {
+        let name = EntityFormatting.title(event)
+        let when = event.timestamp.formatted(.relative(presentation: .named))
+        return Button { editing = event } label: {
+            HStack(spacing: 12) {
+                ActivityTile(kind: .event, size: 30, glyph: 17, emoji: event.eventEmoji)
+                Text(name).font(.body).foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                Text(when).font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+            }
+            .padding(.horizontal, 15).padding(.vertical, 10)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 15).padding(.vertical, 10)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(type.name), \(when)")
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(name), \(when)") // a Button is one element already
     }
 
     /// One tap in the Add Activity sheet: this event type, for the selected child, now. Queued like
@@ -1038,7 +1045,8 @@ private struct QuickAddMenu: View {
 private struct AllActivitiesSheet: View {
     @Environment(\.dismiss) private var dismiss
     var showsSickMode: Bool
-    /// The server's event types, each logged now with one tap; empty without events.
+    /// The child's most used event types (see ``EventUsage/topTypes``), each logged now with one
+    /// tap; empty without events.
     var eventTypes: [EntityEditorView.EventTypeChoice] = []
     var onLogEvent: (String) -> Void = { _ in }
     var onPick: (EntityKind) -> Void
@@ -1088,33 +1096,33 @@ private struct AllActivitiesSheet: View {
         .buttonStyle(.plain)
     }
 
-    /// A tile per event type that logs it now, and "Event…" for the editor, where several can be
-    /// logged at once.
+    /// A tile per most used event type that logs it now, and "New event…" for the editor, with every
+    /// type and several at once.
     private var eventsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader("Events")
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(eventTypes, id: \.slug) { type in
                     Button { onLogEvent(type.slug) } label: {
-                        tileLabel(Text(type.name))
+                        tileLabel(Text(type.name), emoji: type.emoji)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Log \(type.name)")
                     .accessibilityHint("Logs it now")
                 }
                 Button { onPick(.event) } label: {
-                    tileLabel(Text("Event\u{2026}"))
+                    tileLabel(Text("New event\u{2026}"))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Event\u{2026}")
+                .accessibilityLabel("New event\u{2026}")
                 .accessibilityHint("Choose one or more events to log")
             }
         }
     }
 
-    private func tileLabel(_ title: Text) -> some View {
+    private func tileLabel(_ title: Text, emoji: String? = nil) -> some View {
         VStack(spacing: 7) {
-            ActivityTile(kind: .event, size: 56, glyph: 27)
+            ActivityTile(kind: .event, size: 56, glyph: 27, emoji: emoji)
             title.font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
         .frame(maxWidth: .infinity)

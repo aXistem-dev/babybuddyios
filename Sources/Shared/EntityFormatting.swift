@@ -2,7 +2,7 @@ import Foundation
 
 /// Renders a cached ``LocalEntity`` payload into human-readable text for lists and cards.
 enum EntityFormatting {
-    /// The kind's name; for an event, its type's name ("Bath"), else its slug, else "Event".
+    /// The kind's name; for an event, its type's name ("Massage"), else its slug, else "Event".
     static func title(_ entity: LocalEntity) -> String {
         guard entity.kind == .event else { return entity.kind.displayName }
         guard let slug = entity.payloadObject["type"] as? String, !slug.isEmpty else {
