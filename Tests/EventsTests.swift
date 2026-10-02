@@ -262,4 +262,44 @@ final class EventsTests: XCTestCase {
         XCTAssertEqual(emoji["emoji"] as? String, "\u{1F486}")
         XCTAssertNil(emoji["slug"])
     }
+
+    // MARK: v2: deleting a type with its events
+
+    /// `delete_with_events` decodes when the server sends it and is false on an older one; a cache
+    /// written before the flag existed still reads, with it false.
+    func testDeleteWithEventsPermission() throws {
+        let list = Data(#"{"count": 0, "results": [], "permissions": {"add": true, "change": true, "delete": true, "delete_with_events": true}}"#.utf8)
+        XCTAssertTrue(EventsCapability.permissions(fromListJSON: list).deleteWithEvents)
+        let older = Data(#"{"count": 0, "results": [], "permissions": {"add": true, "change": true, "delete": true}}"#.utf8)
+        XCTAssertFalse(EventsCapability.permissions(fromListJSON: older).deleteWithEvents)
+        XCTAssertTrue(EventsCapability.permissions(fromListJSON: older).delete)
+
+        let oldCache = Data(#"{"add": true, "change": false, "delete": true}"#.utf8)
+        let decoded = try JSONDecoder().decode(EventsCapability.Permissions.self, from: oldCache)
+        XCTAssertEqual(decoded, .init(add: true, change: false, delete: true, deleteWithEvents: false))
+    }
+
+    /// A refused delete carries the server's reason and, from a newer server, how many events use it.
+    func testDeleteConflictDecodes() {
+        let newer = DeleteConflict(from: Data(#"{"detail": "In use.", "event_count": 4}"#.utf8))
+        XCTAssertEqual(newer, DeleteConflict(message: "In use.", eventCount: 4))
+        let older = DeleteConflict(from: Data(#"{"detail": "In use."}"#.utf8))
+        XCTAssertEqual(older, DeleteConflict(message: "In use.", eventCount: nil))
+    }
+
+    /// The confirmation is offered only when events use the type and the user may delete them too;
+    /// otherwise the server's reason shows. Its title counts the events.
+    func testCascadeOfferAndTitle() {
+        let all = EventsCapability.Permissions(add: true, change: true, delete: true, deleteWithEvents: true)
+        let noEvents = EventsCapability.Permissions(add: true, change: true, delete: true, deleteWithEvents: false)
+        XCTAssertTrue(EventTypeEdit.offersCascade(.init(message: nil, eventCount: 2), permissions: all))
+        XCTAssertFalse(EventTypeEdit.offersCascade(.init(message: nil, eventCount: 2), permissions: noEvents))
+        XCTAssertFalse(EventTypeEdit.offersCascade(.init(message: nil, eventCount: 0), permissions: all))
+        XCTAssertFalse(EventTypeEdit.offersCascade(.init(message: nil, eventCount: nil), permissions: all))
+
+        XCTAssertEqual(EventTypeEdit.cascadeTitle(name: "Nail trim", eventCount: 1),
+                       "Delete \u{201C}Nail trim\u{201D} and its 1 event?")
+        XCTAssertEqual(EventTypeEdit.cascadeTitle(name: "Nail trim", eventCount: 4),
+                       "Delete \u{201C}Nail trim\u{201D} and its 4 events?")
+    }
 }

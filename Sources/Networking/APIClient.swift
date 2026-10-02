@@ -230,14 +230,14 @@ final class APIClient {
         return try await sendRaw(req)
     }
 
-    /// DELETE a record addressed by its lookup. A 409 (the record is still in use) comes back as
-    /// `.badRequest(status: 409, message:)`, so the server's reason can be shown as it is.
-    func deleteRaw(path: String, lookup: String) async throws {
+    /// DELETE a record addressed by its lookup, with optional query parameters. A 409 (the record is
+    /// still in use) throws ``DeleteConflict``, carrying the server's reason and how many records use
+    /// it, when the server says.
+    func deleteRaw(path: String, lookup: String, query: [URLQueryItem] = []) async throws {
         guard Self.isSafeLookup(lookup) else { throw APIError.invalidURL }
-        let (data, http) = try await fetch(try makeRequest(path: "\(path)/\(lookup)/", method: "DELETE"))
-        if http.statusCode == 409 {
-            throw APIError.badRequest(status: 409, message: Self.errorMessage(from: data), fields: [])
-        }
+        let (data, http) = try await fetch(try makeRequest(path: "\(path)/\(lookup)/", method: "DELETE",
+                                                           query: query))
+        if http.statusCode == 409 { throw DeleteConflict(from: data) }
         _ = try check(data, http)
     }
 
@@ -462,6 +462,24 @@ final class APIClient {
             return "\(label): \(plain)"
         }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+}
+
+/// A refused delete (409): the record is still in use. `message` is the server's `detail`, and
+/// `eventCount` how many events use it, when the server sends that (an older one doesn't).
+struct DeleteConflict: Error, Equatable {
+    var message: String?
+    var eventCount: Int?
+
+    init(message: String?, eventCount: Int?) {
+        self.message = message
+        self.eventCount = eventCount
+    }
+
+    init(from data: Data) {
+        let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        message = body?["detail"] as? String ?? APIClient.errorMessage(from: data)
+        eventCount = body?["event_count"] as? Int
     }
 }
 

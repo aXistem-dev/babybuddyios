@@ -189,6 +189,15 @@ struct EventTypeForm: View {
                 Button("Delete", role: .destructive) { Task { await delete() } }
                 Button("Cancel", role: .cancel) {}
             }
+            // Events use it: the server said how many, and this user may delete them with it.
+            .alert(model.pendingCascade.map { EventTypeEdit.cascadeTitle(name: $0.name, eventCount: $0.eventCount) } ?? "",
+                   isPresented: Binding(get: { model.pendingCascade != nil },
+                                        set: { if !$0 { model.pendingCascade = nil } })) {
+                Button("Delete", role: .destructive) { Task { await deleteWithEvents() } }
+                Button("Cancel", role: .cancel) { model.pendingCascade = nil }
+            } message: {
+                Text(EventTypeEdit.cascadeMessage)
+            }
             .onAppear {
                 if let existing {
                     name = existing.payloadObject["name"] as? String ?? ""
@@ -220,5 +229,10 @@ struct EventTypeForm: View {
     private func delete() async {
         guard let existing else { return }
         if await model.delete(existing, session: session, context: context, sync: sync) { dismiss() }
+    }
+
+    private func deleteWithEvents() async {
+        guard let existing else { return }
+        if await model.deleteWithEvents(existing, session: session, context: context, sync: sync) { dismiss() }
     }
 }
