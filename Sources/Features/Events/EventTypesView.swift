@@ -155,7 +155,7 @@ struct EventTypeForm: View {
                                     .font(.caption).foregroundStyle(BBColor.danger)
                             }
                             if let slug = existing?.payloadObject["slug"] as? String {
-                                Text("The type\u{2019}s key (\(slug)) stays the same, so buttons and automations keep working.")
+                                Text("The type\u{2019}s key (\(slug)) stays the same when you rename it.")
                                     .font(.footnote).foregroundStyle(.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
