@@ -43,7 +43,7 @@ final class StashSettingsModel {
     }
 
     /// Change the settings to `new`, sending only the fields that differ. On success the stash
-    /// summary is re-read at once, so the editors' defaults and the milk age alerts follow without
+    /// summary is re-read at once, so the editors' defaults and the expiry alerts follow without
     /// waiting for the next sync; on a refusal the values go back and the server's reason shows.
     func save(_ new: StashSettingsDTO, session: AppSession, sync: SyncEngine) async {
         guard let old = settings, old.can_edit else { return }
@@ -131,10 +131,10 @@ enum StashSettingsEdit {
         return body
     }
 
-    /// Whole hours from zero, with "use first" before "throw away", as the server requires.
+    /// Whole hours from zero, with "expiring soon" before "expires", as the server requires.
     static func agesAreValid(warn: Int, max: Int) -> Bool {
         warn >= 0 && max >= 0 && warn < max
     }
 
-    static let agesMessage = "\u{201C}Use first after\u{201D} has to be less than \u{201C}Throw away after\u{201D}."
+    static let agesMessage = "\u{201C}Expiring soon after\u{201D} has to be less than \u{201C}Expires after\u{201D}."
 }

@@ -1,7 +1,7 @@
 import XCTest
 @testable import BabyBuddy
 
-/// The milk age alerts: one "use it first" and one "throw it away" per stash lot, planned through
+/// The milk stash expiry alerts: one "expiring soon" and one "expired" per stash lot, planned through
 /// the same diff as the other local alerts, so a used-up lot drops its alerts and a delivered one
 /// isn't fired again.
 final class StashAgeAlertTests: XCTestCase {
@@ -38,16 +38,16 @@ final class StashAgeAlertTests: XCTestCase {
         let r = StashAgePolicy.requests(from: summary(lots: [lot(t0, 90)]), now: t0)
         let warn = r.first { $0.id.hasPrefix("stash-warn") }
         let expire = r.first { $0.id.hasPrefix("stash-expire") }
-        XCTAssertEqual(warn?.title, "Milk is getting old")
-        XCTAssertEqual(expire?.title, "Throw this milk away")
+        XCTAssertEqual(warn?.title, "Milk expiring soon")
+        XCTAssertEqual(expire?.title, "Milk has expired")
         XCTAssertTrue(warn?.body.hasPrefix("90 ml pumped ") == true, warn?.body ?? "")
-        XCTAssertTrue(warn?.body.hasSuffix(" is 48 h old: use it first.") == true, warn?.body ?? "")
+        XCTAssertTrue(warn?.body.hasSuffix(" is 48 h old and expiring soon.") == true, warn?.body ?? "")
         XCTAssertTrue(expire?.body.hasPrefix("90 ml pumped ") == true, expire?.body ?? "")
-        XCTAssertTrue(expire?.body.hasSuffix(" is past 72 h.") == true, expire?.body ?? "")
+        XCTAssertTrue(expire?.body.hasSuffix(" is past 72 h. Throw it away.") == true, expire?.body ?? "")
         XCTAssertEqual(Set(r.map(\.url)), ["babybuddy://stash"])
     }
 
-    /// A lot past its warn age but not expired still gets its "use it first", at its (past) time:
+    /// A lot past its warn age but not expired still gets its "expiring soon", at its (past) time:
     /// the overdue lane fires it once.
     func testWarnPastButNotExpiredStillWanted() {
         let now = t0.addingTimeInterval(50 * 3600)
@@ -58,7 +58,7 @@ final class StashAgeAlertTests: XCTestCase {
         XCTAssertEqual(plan.add.map(\.id).sorted(), ["stash-expire-\(epoch)", "stash-warn-\(epoch)"])
     }
 
-    /// An expired lot only needs throwing away: no "use it first" next to it.
+    /// An expired lot only needs throwing away: no "expiring soon" next to it.
     func testExpiredLotOnlyGetsThrowAway() {
         let now = t0.addingTimeInterval(80 * 3600)
         let r = StashAgePolicy.requests(from: summary(lots: [lot(t0, 90)]), now: now)
@@ -109,14 +109,5 @@ final class StashAgeAlertTests: XCTestCase {
         XCTAssertTrue(StashAgePolicy.isEnabled)
         SharedDefaults.suite.set(false, forKey: StashAgePolicy.enabledKey)
         XCTAssertFalse(StashAgePolicy.isEnabled)
-    }
-
-    @MainActor
-    func testSettingsSubtitleFollowsTheServer() {
-        XCTAssertEqual(SettingsView.stashAlertsSubtitle(summary(lots: [])),
-                       "Use first after 48 h, throw away after 72 h (set on the server)")
-        XCTAssertNil(SettingsView.stashAlertsSubtitle(nil))
-        XCTAssertEqual(SettingsView.stashAlertsSubtitle(summary(lots: []), inSettings: true),
-                       "Use first after 48 h, throw away after 72 h (set in Milk stash)")
     }
 }

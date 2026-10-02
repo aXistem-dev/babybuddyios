@@ -211,7 +211,7 @@ enum DemoData {
     /// Robin, who produces milk, and Sam, who doesn't; pumping on Robin put into the stash;
     /// breast-milk bottles taken from it, one with some spilled; donor milk added, and a discard
     /// with no reason. Timed so FIFO leaves one lot about 80 h old (expired), one about 50 h old
-    /// (warn) and two fresh ones, so every lot state and both milk age alerts can be seen. ids 4000+
+    /// (warn) and two fresh ones, so every lot state and both expiry alerts can be seen. ids 4000+
     /// (the parents are 1 and 2).
     ///
     /// `BB_MILK_PARENTS=2` adds Casey (parent 3), a second parent who produces milk, with a session

@@ -124,14 +124,14 @@ struct StashView: View {
         }
     }
 
-    /// "Use first" while the oldest milk is getting old, "Throw away" once some is too old.
+    /// "Expiring soon" while the oldest milk is near its limit, "Expired" once some is past it.
     private func statusBanner(_ summary: StashSummaryDTO) -> some View {
         let expired = summary.status == .expired
         let color = expired ? BBColor.danger : BBColor.warning
         let oldest = summary.oldest_age_hours.map { " The oldest is \(Int($0)) h old." } ?? ""
         let text = expired
-            ? "Throw away: some milk is older than \(Int(summary.max_age_hours)) h.\(oldest)"
-            : "Use first: some milk is older than \(Int(summary.warn_age_hours)) h.\(oldest)"
+            ? "Expired: some milk is older than \(Int(summary.max_age_hours)) h.\(oldest)"
+            : "Expiring soon: some milk is older than \(Int(summary.warn_age_hours)) h.\(oldest)"
         return HStack(alignment: .top, spacing: 9) {
             Image(systemName: expired ? "trash.fill" : "clock.fill")
                 .font(.system(size: 13))
@@ -369,7 +369,7 @@ struct StashView: View {
 
 // MARK: - Status chip
 
-/// A lot's, or the whole stash's, age state: fresh (success), use first (warning), expired (danger).
+/// A lot's, or the whole stash's, age state: fresh (success), expiring soon (warning), expired (danger).
 struct StashStatusChip: View {
     let status: StashStatus
 

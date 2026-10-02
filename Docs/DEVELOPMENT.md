@@ -80,7 +80,7 @@ Pass these via `SIMCTL_CHILD_<NAME>` environment variables to `xcrun simctl laun
 | `BB_NUDGE=gentle\|milestone\|banner` | Force a support-nudge surface on the Dashboard |
 | `BB_TIMER_ALERT_SECONDS=<n>` | Turn forgotten-timer alerts on and fire them `n` seconds after a timer starts, whatever Settings says |
 | `BB_DOSE_ALERT_SECONDS=<n>` | Turn medication reminders on and shorten every next-dose interval to `n` seconds (the editor's shortest is 4 h) |
-| `BB_STASH_ALERT_SECONDS=<n>` | Turn milk age alerts on and fire each stash lot's "use it first" `n` seconds after the first reconcile that computes the alerts (not after launch), its "throw it away" `3n` (on a server with the milk stash, or `BB_DEMO`) |
+| `BB_STASH_ALERT_SECONDS=<n>` | Turn milk stash expiry alerts on and fire each stash lot's "expiring soon" `n` seconds after the first reconcile that computes the alerts (not after launch), its "throw it away" `3n` (on a server with the milk stash, or `BB_DEMO`) |
 | `BB_NO_STASH=1` | With `BB_DEMO`, behave like a server without the milk stash: no stash data, screen or alerts |
 | `BB_MILK_PARENTS=2` | With `BB_DEMO`, add a second parent who produces milk, so the parent pickers show and lots name their parent |
 | `BB_NO_EVENTS=1` | With `BB_DEMO`, behave like a server without events: no event types, events or event UI |

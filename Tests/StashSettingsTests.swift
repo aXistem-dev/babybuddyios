@@ -41,7 +41,7 @@ final class StashSettingsTests: XCTestCase {
         XCTAssertNil(ages["pumping_to_stash"])
     }
 
-    /// "Use first" has to come before "throw away", in whole hours from zero.
+    /// "Expiring soon" has to come before "expires", in whole hours from zero.
     func testAgesCheck() {
         XCTAssertTrue(StashSettingsEdit.agesAreValid(warn: 48, max: 72))
         XCTAssertTrue(StashSettingsEdit.agesAreValid(warn: 0, max: 1))

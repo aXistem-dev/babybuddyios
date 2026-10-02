@@ -49,24 +49,24 @@ struct StashSettingsSection: View {
         let editable = model.isEditable
         SettingsRow(symbol: "tray.and.arrow.down.fill", tint: BBColor.pumping,
                     title: "Store pumping in the stash",
-                    subtitle: "Pre-selects Store in stash on new pumping.") {
+                    subtitle: "On by default for new pumping.") {
             Toggle("Store pumping in the stash", isOn: toggle(\.pumping_to_stash, in: settings))
                 .labelsHidden().tint(BBColor.primary).disabled(!editable)
         }
         divider
         SettingsRow(symbol: "drop.fill", tint: BBColor.feeding, title: "Bottles from the stash",
-                    subtitle: "Pre-selects Taken from stash on new breast-milk feedings once the stash is in use.") {
+                    subtitle: "On by default for new breast-milk bottles once the stash is in use.") {
             Toggle("Bottles from the stash", isOn: toggle(\.bottle_from_stash, in: settings))
                 .labelsHidden().tint(BBColor.primary).disabled(!editable)
         }
         divider
         let warn = warnDraft ?? settings.warn_age_hours
         let max = maxDraft ?? settings.max_age_hours
-        ageRow("Use first after", subtitle: "Milk this old is marked to use first.",
+        ageRow("Expiring soon after", subtitle: "Milk this old is marked as expiring soon.",
                symbol: "clock", tint: BBColor.warning, hours: warn, range: 0...Swift.max(0, max - 1),
                editable: editable) { warnDraft = $0; scheduleAges() }
         divider
-        ageRow("Throw away after", subtitle: "Milk this old is marked to throw away.",
+        ageRow("Expires after", subtitle: "Milk this old has expired and should be thrown away.",
                symbol: "trash", tint: BBColor.danger, hours: max, range: (warn + 1)...Swift.max(warn + 1, maxHours),
                editable: editable) { maxDraft = $0; scheduleAges() }
     }

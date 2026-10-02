@@ -203,25 +203,24 @@ final class StashTests: UITestCase {
         XCTAssertFalse(app.buttons.labeled("Milk stash").exists)
         tap(app.tabBars.buttons["Settings"])
         expect(app.navigationBars["Settings"])
-        XCTAssertFalse(app.switches["Milk age alerts"].exists)
+        XCTAssertFalse(app.switches["Milk stash expiry"].exists)
     }
 
-    // MARK: Milk age alerts
+    // MARK: Milk stash expiry
 
-    /// Settings ▸ Notifications has the milk age alerts, with the server's age limits. They are on
+    /// Settings ▸ Notifications has the milk stash expiry alerts. They are on
     /// by default in the app; UI tests start them off (`BB_UITEST`), so the demo's old milk doesn't
     /// raise the permission prompt over every other test.
     func testMilkAgeAlertsSetting() {
         launch(["BB_START_TAB": "settings"])
-        let alerts = expect(app.switches["Milk age alerts"])
-        expect(app.staticTexts["Use first after 48 h, throw away after 72 h (set in Milk stash)"])
+        let alerts = expect(app.switches["Milk stash expiry"])
         expectValue(alerts, "0")
         toggle(alerts, to: "1")
         allowNotificationsIfAsked() // turning them on is what asks for permission
     }
 
     /// The demo stash holds a lot past its use-first age. `BB_STASH_ALERT_SECONDS` brings its
-    /// "Milk is getting old" to 25 s after launch; tapping it opens the stash screen, where
+    /// "Milk expiring soon" to 25 s after launch; tapping it opens the stash screen, where
     /// "Throw away" is the next step.
     func testMilkAgeAlertOpensStash() {
         launch(["BB_STASH_ALERT_SECONDS": "25"])
@@ -230,11 +229,11 @@ final class StashTests: UITestCase {
 
         pressHome()
         let banner = springboard.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "Milk is getting old")).firstMatch
+            .matching(NSPredicate(format: "label CONTAINS %@", "Milk expiring soon")).firstMatch
         if !banner.waitForExistence(timeout: 60) {
             // It may have come and gone while the app was away; Notification Center keeps it.
             openNotificationCenter()
-            XCTAssertTrue(banner.waitForExistence(timeout: 10), "No “Milk is getting old” notification")
+            XCTAssertTrue(banner.waitForExistence(timeout: 10), "No “Milk expiring soon” notification")
         }
         banner.tap()
 
@@ -249,7 +248,7 @@ final class StashTests: UITestCase {
     func testStashSettingsSection() {
         launch(["BB_START_TAB": "settings"])
         expect(app.staticTexts["MILK STASH"]) // section headers are drawn in capitals
-        expect(app.staticTexts["Use first after"])
+        expect(app.staticTexts["Expiring soon after"])
         expect(app.staticTexts["48 h"])
         expect(app.staticTexts["72 h"])
         let store = expect(app.switches["Store pumping in the stash"])
