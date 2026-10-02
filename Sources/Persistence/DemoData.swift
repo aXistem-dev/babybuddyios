@@ -170,16 +170,18 @@ enum DemoData {
         if let id = type.serverID { insert(.eventType, id: id, p, context) }
     }
 
-    /// Demo mode's `DELETE /api/event-types/<slug>/`. Like the server, it refuses a type events use.
+    /// Demo mode's `DELETE /api/event-types/<slug>/`. Like the server, it refuses a type events use,
+    /// saying how many.
     @MainActor
     static func deleteDemoEventType(_ type: LocalEntity, in context: ModelContext) throws {
         let slug = type.payloadObject["slug"] as? String
         let kind = EntityKind.event.rawValue
         let events = (try? context.fetch(FetchDescriptor<LocalEntity>(
             predicate: #Predicate { $0.kindRaw == kind }))) ?? []
-        if events.contains(where: { $0.payloadObject["type"] as? String == slug }) {
-            throw APIError.badRequest(status: 409,
-                                      message: "This event type is used by events and can not be deleted.", fields: [])
+        let count = events.filter { $0.payloadObject["type"] as? String == slug }.count
+        if count > 0 {
+            throw DeleteConflict(message: "This event type is used by events and can not be deleted.",
+                                 eventCount: count)
         }
         context.delete(type)
     }
@@ -199,7 +201,8 @@ enum DemoData {
             predicate: #Predicate { $0.kindRaw == kind }))) ?? []
         EventsCapability.store(typesIn: types)
         let manages = ProcessInfo.processInfo.environment["BB_EVENT_TYPES_READONLY"] != "1"
-        EventsCapability.store(permissions: .init(add: manages, change: manages, delete: manages))
+        EventsCapability.store(permissions: .init(add: manages, change: manages, delete: manages,
+                                                  deleteWithEvents: manages))
     }
 
     // MARK: Milk stash

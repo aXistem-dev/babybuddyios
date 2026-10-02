@@ -152,15 +152,34 @@ final class EventTests: UITestCase {
         expect(app.navigationBars["Event types"])
     }
 
-    /// A type that events still use can't be deleted: the server's reason shows.
-    func testDeletingUsedTypeIsRefused() {
+    /// Deleting a type that events use asks first, counting them: Cancel keeps the type; Delete
+    /// removes it and its events, so Home's Latest row moves on to the next newest event.
+    func testDeleteTypeWithEventsAsksFirst() {
         launch(["BB_START_TAB": "settings"])
         tap(app.buttons.labeled("Event types"))
-        tap(app.buttons["Massage"])
-        expect(app.navigationBars["Edit event type"])
+        let title = "Delete \u{201C}Outfit change\u{201D} and its 1 event?"
+
+        tap(app.buttons["Outfit change"])
         tap(app.buttons["Delete event type"])
         tap(app.alerts.buttons["Delete"])
-        expect(element(labeled: "This event type is used by events and can not be deleted."))
+        expect(app.alerts[title])
+        expect(app.staticTexts["Every event of this type will be removed. This can\u{2019}t be undone."])
+        tap(app.alerts[title].buttons["Cancel"])
+        expectGone(app.alerts[title])
+        tap(app.navigationBars["Edit event type"].buttons["Cancel"])
+        expect(app.buttons["Outfit change"])
+
+        tap(app.buttons["Outfit change"])
+        tap(app.buttons["Delete event type"])
+        tap(app.alerts.buttons["Delete"])
+        tap(app.alerts[title].buttons["Delete"])
+        expectGone(app.navigationBars["Edit event type"])
+        expectGone(app.buttons["Outfit change"])
+
+        tap(app.tabBars.buttons["Home"])
+        // The next newest are a massage and a nail trim logged together: either can lead.
+        expect(elements("label BEGINSWITH 'Massage, ' OR label BEGINSWITH 'Nail trim, '").firstMatch)
+        XCTAssertFalse(element(labeled: "Outfit change, ").exists, "Its event went with it")
     }
 
     /// A user the server doesn't let manage event types doesn't see the screen at all.
