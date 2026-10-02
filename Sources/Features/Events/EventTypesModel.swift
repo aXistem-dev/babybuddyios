@@ -30,7 +30,7 @@ final class EventTypesModel {
         #endif
         guard let config = session.config else { status = .offline; return }
         do {
-            let page = try await APIClient(config: config).getRawPath(EntityKind.eventType.path)
+            let page = try await APIClient(config: config).getRawPath(EventsCapability.typeListPath)
             EventsCapability.store(permissions: EventsCapability.permissions(fromListJSON: page))
             if status == .offline { status = .idle }
         } catch {

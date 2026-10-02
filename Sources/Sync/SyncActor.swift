@@ -97,7 +97,7 @@ actor SyncActor {
             predicate: #Predicate { $0.kindRaw == kind }))) ?? []
         EventsCapability.store(typesIn: types)
         // A failed request keeps the permissions this phone last had.
-        if let page = try? await client.getRawPath(EntityKind.eventType.path) {
+        if let page = try? await client.getRawPath(EventsCapability.typeListPath) {
             EventsCapability.store(permissions: EventsCapability.permissions(fromListJSON: page))
         }
         return EventsCapability.typeNames != names

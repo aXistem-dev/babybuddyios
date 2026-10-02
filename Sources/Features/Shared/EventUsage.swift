@@ -1,6 +1,6 @@
 import Foundation
 
-/// Which events and event types Home and the Add Activity sheet put first, from the synced events.
+/// Which event types the Add Activity sheet puts first, from the synced events.
 /// Pure, so the ranking is testable without a view.
 enum EventUsage {
     /// How far back "most used" looks: the app's pull window, so every counted event is synced.
@@ -29,17 +29,5 @@ enum EventUsage {
             return a.name.localizedStandardCompare(b.name) == .orderedAscending
         }
         return Array(ranked.prefix(limit))
-    }
-
-    /// `child`'s `limit` most recent events, newest first; a type can come up more than once. Events
-    /// logged together (the same time) keep a fixed order, by type slug.
-    static func lastEvents(_ entities: [LocalEntity], child: Int, limit: Int = 5) -> [LocalEntity] {
-        Array(entities
-            .filter { $0.kind == .event && $0.childID == child && $0.syncState != .pendingDelete }
-            .sorted { a, b in
-                if a.timestamp != b.timestamp { return a.timestamp > b.timestamp }
-                return (a.payloadObject["type"] as? String ?? "") < (b.payloadObject["type"] as? String ?? "")
-            }
-            .prefix(limit))
     }
 }
