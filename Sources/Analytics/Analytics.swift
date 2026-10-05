@@ -589,6 +589,7 @@ extension Analytics {
         case .badRequest(let status, _, let fields):
             name = "Error.serverRejected"; parameters["reason"] = "badRequest-\(status)"
             if !fields.isEmpty { parameters["fields"] = fields.joined(separator: ",") }
+            if let rule = error.rejectionRule { parameters["rule"] = rule.rawValue }
         case .decoding(let detail):
             name = "Error.serverRejected"; parameters["reason"] = "decoding"
             // `detail` is free text for most decode failures (a `DecodingError` description, which

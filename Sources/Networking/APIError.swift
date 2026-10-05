@@ -109,6 +109,25 @@ enum APIError: Error, Equatable {
         }
     }
 
+    /// Which of Baby Buddy's record-level validation rules a 400 tripped, from a closed set, so it
+    /// is safe to report. Matched on the server's English messages in `core/models.py`
+    /// (`validate_unique_period`, `validate_time`, `validate_duration`); a server running in
+    /// another language reads as `other`. The future-time rule names its field (`start`, `end`)
+    /// rather than `non_field_errors`, so it is matched on the message alone.
+    enum RejectionRule: String {
+        case overlap, future, order, duration, other
+    }
+
+    var rejectionRule: RejectionRule? {
+        guard case .badRequest(400, let message, let fields) = self else { return nil }
+        let text = message ?? ""
+        if text.contains("Another entry intersects the specified time period") { return .overlap }
+        if text.contains("can not be in the future") { return .future }
+        if text.contains("Start time must come before end time") { return .order }
+        if text.contains("Duration too long") { return .duration }
+        return fields.contains("non_field_errors") ? .other : nil
+    }
+
     /// A server-side 5xx specifically (excludes `offline`). Used to skip a single failing kind
     /// during a bulk pull without aborting the whole sync, while still treating a lost
     /// connection as a hard stop.
