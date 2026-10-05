@@ -39,6 +39,7 @@ final class AnalyticsSignalTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
+        Analytics.resetLaunchDedupe() // the once-per-launch dedupe outlives any one test
         recorder = SignalRecorder()
     }
 
@@ -131,10 +132,8 @@ final class AnalyticsSignalTests: XCTestCase {
 
     // MARK: - Sync outcomes
 
-    /// `Sync.completed` says only that *something* moved, which a permanently parked queue row can
-    /// coexist with on every sync forever. `Sync.finished` adds the closed outcome plus the queue
-    /// census, so a drained sync is distinguishable from a partial one — counts of rows only,
-    /// never which records they were.
+    /// `Sync.finished` carries the closed outcome plus the queue census, so a drained sync is
+    /// distinguishable from a partial one. Counts of rows only, never which records they were.
     func testSyncFinishedCarriesTheOutcomeAndTheQueueCensus() {
         Analytics.syncFinished(outcome: .partialBlocked, delivered: 2, uploaded: 1,
                                blockedNew: 1, blockedTotal: 3, queued: 0)
@@ -161,14 +160,6 @@ final class AnalyticsSignalTests: XCTestCase {
                            ["outcome": outcome.rawValue, "delivered": "0", "uploaded": "0",
                             "blockedNew": "0", "blockedTotal": "0", "queued": "0"])
         }
-    }
-
-    /// The existing Sync & Reliability dashboard counts this one. `Sync.finished` is additive:
-    /// `Sync.completed` keeps firing on exactly the same syncs, still carrying nothing.
-    func testSyncCompletedStaysParameterless() {
-        Analytics.syncCompleted()
-        XCTAssertEqual(recorder.names, ["Sync.completed"])
-        XCTAssertEqual(recorder.parameters("Sync.completed"), [:])
     }
 
     /// A name and a boolean, and nothing else — never the value the setting governs.
@@ -320,12 +311,34 @@ final class AnalyticsSignalTests: XCTestCase {
     /// A missing endpoint is a fact about the server, not about this sync — the second report of
     /// the same one is pure billing.
     func testEndpointMissingIsReportedOncePerEndpoint() {
-        Analytics.resetEndpointMissingDedupe() // the dedupe outlives any one test
         Analytics.serverEndpointMissing("pumping")
         Analytics.serverEndpointMissing("pumping")
         Analytics.serverEndpointMissing("tags")
         XCTAssertEqual(recorder.names, ["Server.endpointMissing", "Server.endpointMissing"])
         XCTAssertEqual(recorder.signals.map { $0.parameters["endpoint"] }, ["pumping", "tags"])
+    }
+
+    /// An offline phone or a broken pull fails the same way on every sync, so each reason and
+    /// context is reported once per launch. A different reason or context still gets through.
+    func testNetworkErrorsAndPullFailuresAreReportedOncePerLaunch() {
+        for attempt in 1...3 {
+            Analytics.report(.offline(), context: "push-create-feeding", attempt: attempt)
+            Analytics.report(.decoding("nonJSON"), context: "pull-tags")
+            Analytics.error(network: "pull-unknown")
+        }
+        Analytics.report(.offline(), context: "pull-tags")
+        Analytics.report(.server(status: 502), context: "push-create-feeding")
+        XCTAssertEqual(recorder.names, ["Error.network", "Error.serverRejected", "Error.network",
+                                        "Error.network", "Error.network"])
+        XCTAssertEqual(recorder.parameters("Error.network"),
+                       ["reason": "offline", "context": "push-create-feeding", "attempt": "1"])
+    }
+
+    /// A push or upload rejection already fires once, when its row is parked, so every one is sent.
+    func testPushRejectionsAreNotDeduplicated() {
+        Analytics.report(.notFound, context: "push-create-pumping", attempt: 1)
+        Analytics.report(.notFound, context: "push-create-pumping", attempt: 1)
+        XCTAssertEqual(recorder.names, ["Error.serverRejected", "Error.serverRejected"])
     }
 
     // MARK: - Sick mode
