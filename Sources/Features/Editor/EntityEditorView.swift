@@ -195,6 +195,7 @@ struct EntityEditorView: View {
         sectioned("Tags") { tagsCard }
         if showsNotes { sectioned("Notes") { notesCard } }
         doseWarning
+        overlapWarning
         validationNotice
         actionButtons.padding(.top, 4)
     }
@@ -658,6 +659,29 @@ struct EntityEditorView: View {
             let message = "\(medName.trimmingCharacters(in: .whitespaces)) was last given at \(given). Next dose OK at \(next)."
             warningNotice(message, accessibilityLabel: "Warning. \(message)")
         }
+    }
+
+    /// The cached entry of the same kind this one would overlap, which the server refuses to save
+    /// alongside it. A warning, not a block: the cache can be stale, and the user may mean to fix
+    /// the other entry afterwards.
+    @ViewBuilder private var overlapWarning: some View {
+        if let other = overlappingRecord, let period = ActivityDraft.period(of: other) {
+            let message = "Overlaps the \(period.formatted(.interval.hour().minute())) \(kind.displayName.lowercased()). Baby Buddy won\u{2019}t accept both."
+            warningNotice(message, accessibilityLabel: "Warning. \(message)")
+        }
+    }
+
+    /// Fetched rather than queried, so only records that could intersect are read: upstream caps a
+    /// period at 24 hours, so anything starting earlier than that has already ended.
+    private var overlappingRecord: LocalEntity? {
+        guard ActivityDraft.overlapCheckedKinds.contains(kind) else { return nil }
+        let kindRaw = kind.rawValue, child = Optional(childID)
+        let earliest = start.addingTimeInterval(-24 * 3600), latest = end
+        let candidates = (try? context.fetch(FetchDescriptor<LocalEntity>(predicate: #Predicate {
+            $0.kindRaw == kindRaw && $0.childID == child && $0.timestamp >= earliest && $0.timestamp < latest
+        }))) ?? []
+        return ActivityDraft.overlapping(kind: kind, childID: childID, start: start, end: end,
+                                         excluding: entity?.localID, in: candidates)
     }
 
     private func warningNotice(_ message: String, accessibilityLabel: String) -> some View {

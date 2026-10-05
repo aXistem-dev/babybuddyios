@@ -37,8 +37,9 @@ enum ActivityProblem: Equatable {
 /// form schema: `validate_time(start)` for feeding/pumping, `validate_time(start)` *and* `(end)`
 /// for sleep/tummy time, `validate_duration` (start ≤ end, ≤ 24h) for all four, `validate_time(time)`
 /// for changes/temperature/medication (notes are exempt upstream), and `validate_date(date)` for the
-/// growth measurements. Overlap (`validate_unique_period`) is deliberately left to the server: the
-/// local cache is windowed, so a local check would be wrong in both directions.
+/// growth measurements. Overlap (`validate_unique_period`) is not a block here: the local cache is
+/// windowed and can be stale, so a local check would be wrong in both directions. The editor shows
+/// ``overlapping(kind:childID:start:end:excluding:in:)`` as a warning instead.
 struct ActivityDraft {
     var kind: EntityKind
     var start = Date()
@@ -113,6 +114,34 @@ struct ActivityDraft {
     private func isFutureDay(_ day: Date) -> Bool {
         let calendar = Calendar.current
         return calendar.startOfDay(for: day) > calendar.startOfDay(for: now)
+    }
+
+    // MARK: Overlap
+
+    /// The kinds Baby Buddy refuses to let overlap another of the same kind for the same child
+    /// (`validate_unique_period` in each model's `clean()`).
+    static let overlapCheckedKinds: Set<EntityKind> = [.feeding, .sleep, .tummyTime, .pumping]
+
+    /// The first cached record that `start...end` intersects, by upstream's test
+    /// (`start < other.end && end > other.start`, so touching ends don't count). `excluding` is the
+    /// record being edited; records waiting to be deleted are ignored.
+    static func overlapping(kind: EntityKind, childID: Int, start: Date, end: Date,
+                            excluding: UUID?, in records: [LocalEntity]) -> LocalEntity? {
+        guard overlapCheckedKinds.contains(kind), start < end else { return nil }
+        return records.first { record in
+            guard record.kind == kind, record.childID == childID, record.localID != excluding,
+                  record.syncState != .pendingDelete,
+                  let range = period(of: record) else { return false }
+            return range.lowerBound < end && range.upperBound > start
+        }
+    }
+
+    /// A start/end record's period, from its payload.
+    static func period(of record: LocalEntity) -> Range<Date>? {
+        let payload = record.payloadObject
+        guard let start = (payload["start"] as? String).flatMap(APIDate.parse),
+              let end = (payload["end"] as? String).flatMap(APIDate.parse), start < end else { return nil }
+        return start..<end
     }
 
     // MARK: Numeric input

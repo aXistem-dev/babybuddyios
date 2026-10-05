@@ -199,4 +199,34 @@ final class ActivityValidationTests: XCTestCase {
             XCTAssertFalse(problem.message.isEmpty, "\(problem)")
         }
     }
+
+    // MARK: Overlap warning
+
+    /// Upstream's `start < other.end && end > other.start`, per kind and child, minus the record
+    /// being edited and anything waiting to be deleted.
+    func testOverlappingMatchesUpstreamRule() {
+        func record(_ kind: EntityKind = .feeding, child: Int = 1, from: Double, to: Double,
+                    state: SyncState = .synced) -> LocalEntity {
+            let payload: [String: Any] = [
+                "child": child,
+                "start": APIDate.isoDateTime.string(from: now.addingTimeInterval(from * 60)),
+                "end": APIDate.isoDateTime.string(from: now.addingTimeInterval(to * 60))]
+            return LocalEntity(kind: kind, serverID: 1, childID: child, timestamp: now,
+                               payload: (try? JSONSerialization.data(withJSONObject: payload)) ?? Data(),
+                               syncState: state)
+        }
+        func overlap(_ records: [LocalEntity], kind: EntityKind = .feeding, excluding: UUID? = nil) -> LocalEntity? {
+            ActivityDraft.overlapping(kind: kind, childID: 1, start: now.addingTimeInterval(-30 * 60),
+                                      end: now.addingTimeInterval(-10 * 60), excluding: excluding, in: records)
+        }
+        let hit = record(from: -40, to: -20)
+        XCTAssertTrue(overlap([hit]) === hit)
+        XCTAssertNil(overlap([record(from: -50, to: -30)]), "touching ends don't overlap")
+        XCTAssertNil(overlap([record(.sleep, from: -40, to: -20)]), "another kind")
+        XCTAssertNil(overlap([record(child: 2, from: -40, to: -20)]), "another child")
+        XCTAssertNil(overlap([record(from: -40, to: -20, state: .pendingDelete)]))
+        XCTAssertNil(overlap([hit], excluding: hit.localID), "the record being edited")
+        let change = record(.change, from: -40, to: -20)
+        XCTAssertNil(overlap([change], kind: .change), "the server doesn't check this kind")
+    }
 }
