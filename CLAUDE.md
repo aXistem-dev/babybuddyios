@@ -25,6 +25,12 @@ An offline-first iOS client for a self-hosted [Baby Buddy](https://github.com/ba
   Store link, never a build. `node scripts/release.mjs status <version>` asks App Store Connect the
   same question locally, with `ASC_KEY_ID` and `ASC_ISSUER_ID` set.
 
+## Merging
+
+The owner never merges; the agent merges only on their say-so. The one merge signal is the owner
+writing "merge it" or "merge" in chat. "looks good", "nice" and anything else are not approval. On
+that signal, confirm the PR checks are green, then run `gh pr merge --merge --delete-branch`.
+
 ## Sorting PRs: a milestone or `internal`
 
 Every PR gets exactly one of the two, so the public history says what each change was for and the
