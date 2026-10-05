@@ -241,6 +241,136 @@ final class BlockedSyncStateTests: XCTestCase {
     }
     #endif
 
+    // MARK: Overlap rejections
+
+    private static let overlap = #"{"non_field_errors":["Another entry intersects the specified time period. Conflicting entry: <a href=\"/feedings/90/\">Feeding</a>"]}"#
+    private let isoEnd = "2024-01-15T10:15:00-05:00"
+
+    /// A queued feeding create with an end, the shape the overlap check applies to.
+    @discardableResult
+    private func queueTimedCreate() -> (LocalEntity, PendingMutation) {
+        let payload = data(["child": 1, "start": iso, "end": isoEnd, "type": "formula", "method": "bottle"])
+        let entity = LocalEntity(kind: .feeding, serverID: nil, childID: 1, timestamp: .now,
+                                 payload: payload, syncState: .pendingCreate)
+        context.insert(entity)
+        let mutation = PendingMutation(localID: entity.localID, kind: .feeding, op: .create, payload: payload)
+        context.insert(mutation)
+        try? context.save()
+        return (entity, mutation)
+    }
+
+    private func page(_ rows: [[String: Any]]) -> String {
+        String(decoding: data(["count": rows.count, "next": NSNull(), "results": rows]), as: UTF8.self)
+    }
+
+    /// A resend whose first POST did reach the server: the server's copy (same child, start and
+    /// end, here in UTC and with microseconds) becomes the local record's, and nothing is parked.
+    func testOverlapWithOwnEarlierCopyAdoptsIt() async {
+        let (entity, _) = queueTimedCreate()
+        StubTransport.reset([
+            .init(status: 400, body: Self.overlap),
+            .init(status: 200, body: page([["id": 90, "child": 1, "start": "2024-01-15T15:00:00.000000Z",
+                                            "end": "2024-01-15T15:15:00.123456Z", "type": "formula"]])),
+        ])
+
+        let run = await engine.pushPending()
+        XCTAssertEqual(StubTransport.requests.map(\.method), ["POST", "GET"])
+        let lookup = StubTransport.requests[1].url
+        XCTAssertTrue(lookup.contains("/feedings/") && lookup.contains("child=1") && lookup.contains("start_min="),
+                      lookup)
+        XCTAssertEqual(entity.serverID, 90)
+        XCTAssertEqual(entity.syncState, .synced)
+        XCTAssertTrue(mutations().isEmpty, "the create is settled, not parked")
+        XCTAssertEqual(run.blockedNew, 0)
+    }
+
+    /// The sync that lost the response also pulled, so the cache already shows the server's copy
+    /// as a second entry. It gives way to the queued record rather than blocking adoption.
+    func testOverlapAdoptionReplacesAPulledDuplicate() async {
+        let (entity, _) = queueTimedCreate()
+        let pulled = LocalEntity(kind: .feeding, serverID: 90, childID: 1, timestamp: .now,
+                                 payload: data(["id": 90, "child": 1, "start": iso, "end": isoEnd]),
+                                 syncState: .synced)
+        context.insert(pulled)
+        StubTransport.reset([
+            .init(status: 400, body: Self.overlap),
+            .init(status: 200, body: page([["id": 90, "child": 1, "start": iso, "end": isoEnd]])),
+        ])
+
+        await engine.pushPending()
+        XCTAssertEqual(entity.serverID, 90)
+        XCTAssertTrue(mutations().isEmpty)
+        let cached = (try? context.fetch(FetchDescriptor<LocalEntity>())) ?? []
+        XCTAssertEqual(cached.filter { $0.serverID == 90 }.count, 1, "one local record per server record")
+    }
+
+    /// Someone else's entry in that period is a real overlap: the create stays parked with the
+    /// server's reason, and the other entry is left as it is.
+    func testOverlapWithADifferentEntryStaysParked() async {
+        let (entity, mutation) = queueTimedCreate()
+        StubTransport.reset([
+            .init(status: 400, body: Self.overlap),
+            .init(status: 200, body: page([["id": 91, "child": 1, "start": iso,
+                                            "end": "2024-01-15T10:20:00-05:00"]])),
+        ])
+
+        let run = await engine.pushPending()
+        XCTAssertEqual(StubTransport.requests.map(\.method), ["POST", "GET"], "read-only: nothing else is sent")
+        XCTAssertTrue(mutation.isBlocked)
+        XCTAssertTrue(mutation.lastError?.hasPrefix("Another entry intersects") == true)
+        XCTAssertNil(entity.serverID)
+        XCTAssertEqual(run.blockedNew, 1)
+    }
+
+    /// A cached copy with local edits of its own isn't silently replaced.
+    func testOverlapDoesNotAdoptACopyWithLocalEdits() async {
+        let (entity, mutation) = queueTimedCreate()
+        context.insert(LocalEntity(kind: .feeding, serverID: 90, childID: 1, timestamp: .now,
+                                   payload: data(["id": 90, "child": 1, "start": iso, "end": isoEnd]),
+                                   syncState: .pendingUpdate))
+        StubTransport.reset([
+            .init(status: 400, body: Self.overlap),
+            .init(status: 200, body: page([["id": 90, "child": 1, "start": iso, "end": isoEnd]])),
+        ])
+
+        await engine.pushPending()
+        XCTAssertTrue(mutation.isBlocked)
+        XCTAssertNil(entity.serverID)
+    }
+
+    /// A lookup that can't reach the server leaves the create for the next sync instead of parking it.
+    func testOverlapLookupOfflineRetriesLater() async {
+        let (_, mutation) = queueTimedCreate()
+        StubTransport.reset([.init(status: 400, body: Self.overlap), .init(status: 503, body: "{}")])
+
+        let run = await engine.pushPending()
+        XCTAssertFalse(mutation.isBlocked)
+        XCTAssertTrue(run.stoppedRetryable)
+    }
+
+    /// Only the overlap rule triggers a lookup; other rejections park straight away.
+    func testOtherRejectionsDoNotLookUp() async {
+        let (_, mutation) = queueTimedCreate()
+        StubTransport.reset([.init(status: 400, body: #"{"non_field_errors":["Duration too long."]}"#)])
+        await engine.pushPending()
+        XCTAssertEqual(StubTransport.requests.count, 1)
+        XCTAssertTrue(mutation.isBlocked)
+    }
+
+    func testRejectionRuleMatchesBabyBuddyMessages() {
+        func rule(_ message: String?, _ fields: [String] = ["non_field_errors"], status: Int = 400) -> APIError.RejectionRule? {
+            APIError.badRequest(status: status, message: message, fields: fields).rejectionRule
+        }
+        XCTAssertEqual(rule("Another entry intersects the specified time period. Conflicting entry: Feeding (1:09 a.m. - 1:24 a.m.)"), .overlap)
+        XCTAssertEqual(rule("Start: Date/time can not be in the future.", ["start"]), .future)
+        XCTAssertEqual(rule("Start time must come before end time."), .order)
+        XCTAssertEqual(rule("Duration too long."), .duration)
+        XCTAssertEqual(rule("Une autre entrée chevauche la période."), .other)
+        XCTAssertNil(rule("Amount: This field is required.", ["amount"]), "a plain field error has no rule")
+        XCTAssertNil(rule("Duration too long.", status: 413))
+        XCTAssertNil(APIError.forbidden.rejectionRule)
+    }
+
     // MARK: Stale timer conversions (Work Package 4)
 
     /// A conversion queued before #145: the create carries the write-only `timer` id. Conversions
