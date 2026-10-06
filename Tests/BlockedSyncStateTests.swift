@@ -843,9 +843,9 @@ final class BlockedSyncStateTests: XCTestCase {
         return recorder.parameters("Sync.finished")
     }
 
-    /// The queue emptied: the outcome `Sync.completed` alone can't distinguish from a sync that
-    /// delivered one record and parked another.
-    func testDrainedSyncReportsDrainedAlongsideSyncCompleted() async {
+    /// The queue emptied, which a sync that delivered one record and parked another must not
+    /// look like.
+    func testDrainedSyncReportsDrained() async {
         let recorder = SignalRecorder()
         defer { recorder.stop() }
         queueCreate()
@@ -856,7 +856,6 @@ final class BlockedSyncStateTests: XCTestCase {
         XCTAssertEqual(outcome(of: recorder),
                        ["outcome": "drained", "delivered": "1", "uploaded": "0",
                         "blockedNew": "0", "blockedTotal": "0", "queued": "0"])
-        XCTAssertTrue(recorder.names.contains("Sync.completed"), "the existing signal is unchanged")
     }
 
     /// The pattern the investigation found: a rejection parks a row, the sync reports itself as
@@ -872,7 +871,6 @@ final class BlockedSyncStateTests: XCTestCase {
         XCTAssertEqual(outcome(of: recorder),
                        ["outcome": "partialBlocked", "delivered": "0", "uploaded": "0",
                         "blockedNew": "1", "blockedTotal": "1", "queued": "0"])
-        XCTAssertFalse(recorder.names.contains("Sync.completed"), "nothing moved")
     }
 
     /// A 5xx says nothing about the payload: the row stays eligible, and the outcome says the
@@ -914,8 +912,8 @@ final class BlockedSyncStateTests: XCTestCase {
                         "blockedNew": "0", "blockedTotal": "0", "queued": "1"])
     }
 
-    /// The noise suppression `Sync.completed` has: most syncs are foreground/pull-to-refresh/
-    /// post-timer no-ops with an empty queue, and reporting those would swamp the signal.
+    /// Most syncs are foreground/pull-to-refresh/post-timer no-ops with an empty queue, and
+    /// reporting those would swamp the signal.
     func testNoOpSyncReportsNothing() async {
         let recorder = SignalRecorder()
         defer { recorder.stop() }
@@ -927,8 +925,9 @@ final class BlockedSyncStateTests: XCTestCase {
 
     /// A row already parked when the sync starts — the shape an upgrade from build 1.0.2 inherits,
     /// and the one that produced hundreds of identical events. Walking past it must send nothing
-    /// and report nothing new: no request, no rejection, and `blockedNew` zero. The standing
-    /// backlog stays visible in `blockedTotal`, which is what makes the sync knowably partial.
+    /// and report nothing: no request, no rejection, and no `Sync.finished`. The backlog was
+    /// reported when the row was parked, and `blockedTotal` carries it on the next sync that
+    /// does something.
     func testAlreadyBlockedRowIsSkippedWithoutReportingARejection() async {
         let recorder = SignalRecorder()
         defer { recorder.stop() }
@@ -943,11 +942,7 @@ final class BlockedSyncStateTests: XCTestCase {
         XCTAssertEqual(recorder.names.filter { $0 == "Error.serverRejected" }.count, 0,
                        "skipping a row that was already blocked reports no rejection")
         XCTAssertEqual(mutation.attemptCount, 1, "and its attempt count stops climbing")
-        XCTAssertEqual(recorder.parameters("Sync.finished"),
-                       ["outcome": "partialBlocked", "delivered": "0", "uploaded": "0",
-                        "blockedNew": "0", "blockedTotal": "1", "queued": "0"])
-        XCTAssertEqual(recorder.names.filter { $0 == "Sync.finished" }.count, 5,
-                       "the backlog is reported per sync; the rejection is not")
+        XCTAssertEqual(recorder.names, [], "a standing backlog isn't news on every sync")
     }
     #endif
 

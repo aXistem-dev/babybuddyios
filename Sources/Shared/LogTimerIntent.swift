@@ -28,8 +28,8 @@ struct LogTimerIntent: LiveActivityIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         // May run in a fresh background launch of the app process, so start analytics defensively.
-        Analytics.start()
-        Analytics.widgetIntent("LogTimer")
+        // An intent run isn't a session, so it doesn't send `TelemetryDeck.Session.started`.
+        Analytics.start(sendSessionStarted: false)
         let container = try ModelContainer(
             for: LocalStore.schema,
             configurations: ModelConfiguration(schema: LocalStore.schema, url: LocalStore.storeURL))

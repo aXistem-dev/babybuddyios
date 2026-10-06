@@ -19,8 +19,8 @@ struct StartTimerIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         // The intent runs in a separate process from the app, so analytics must be started here.
-        Analytics.start()
-        Analytics.widgetIntent("StartTimer")
+        // An intent run isn't a session, so it doesn't send `TelemetryDeck.Session.started`.
+        Analytics.start(sendSessionStarted: false)
         let container = try ModelContainer(
             for: LocalStore.schema,
             configurations: ModelConfiguration(schema: LocalStore.schema, url: LocalStore.storeURL))

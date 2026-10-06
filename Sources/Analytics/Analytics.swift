@@ -1,4 +1,5 @@
 import Foundation
+import os
 import TelemetryDeck
 
 /// Thin wrapper around the TelemetryDeck SDK.
@@ -28,12 +29,26 @@ enum Analytics {
     }
 
     /// `true` once `start()` has initialized the SDK.
-    private(set) static var isEnabled = false
+    static var isEnabled: Bool { config != nil }
 
     /// Initializes TelemetryDeck if an App ID is configured and we're not in
-    /// demo mode or a UI test. Safe to call once at launch; a no-op otherwise.
-    static func start() {
-        guard !isEnabled else { return }
+    /// demo mode or a UI test. Safe to call more than once; a no-op otherwise.
+    ///
+    /// The SDK sends `TelemetryDeck.Session.started` when it initializes and on each return to the
+    /// foreground. The app calls this when a scene first comes to the foreground, so a
+    /// background-refresh launch sends nothing. App Intents pass `sendSessionStarted: false`,
+    /// since an intent run isn't a session. `LogTimerIntent` runs in the app's process, so if it
+    /// started the SDK first, the app's own call turns the session signal back on and starts a
+    /// session.
+    static func start(sendSessionStarted: Bool = true) {
+        if let config {
+            // The SDK keeps this same object, so flipping the flag here changes what it does.
+            if sendSessionStarted, !config.sendNewSessionBeganSignal {
+                config.sendNewSessionBeganSignal = true
+                TelemetryDeck.generateNewSession()
+            }
+            return
+        }
         // Demo mode runs offline with seeded data, and UI tests (`BB_UITEST`) drive the app from a
         // script — never report either.
         let environment = ProcessInfo.processInfo.environment
@@ -41,9 +56,13 @@ enum Analytics {
         guard let appID else { return }
 
         let config = TelemetryDeck.Config(appID: appID, salt: salt)
+        config.sendNewSessionBeganSignal = sendSessionStarted
         TelemetryDeck.initialize(config: config)
-        isEnabled = true
+        self.config = config
     }
+
+    /// The configuration TelemetryDeck was initialized with, or `nil` before `start()` ran.
+    private static var config: TelemetryDeck.Config?
 
     /// TelemetryDeck identity for correlating RevenueCat's server-side webhook events with our
     /// signals: the App ID plus the anonymous, salted per-device user hash TelemetryDeck stamps on
@@ -75,11 +94,10 @@ enum Analytics {
     /// exercised without live StoreKit. Compiled out of release entirely.
     static var recorder: ((_ name: String, _ parameters: [String: String]) -> Void)?
 
-    /// Test seam: forgets which endpoints have already been reported missing. The dedupe in
-    /// ``serverEndpointMissing(_:)`` is per *launch*, which in a test host means per whole suite —
-    /// so without this a sync test that trips it would silently change what a later analytics test
-    /// sees.
-    static func resetEndpointMissingDedupe() { reportedMissingEndpoints = [] }
+    /// Test seam: forgets which signals ``signalOncePerLaunch(_:parameters:)`` has already sent.
+    /// That dedupe is per *launch*, which in a test host means per whole suite, so without this a
+    /// sync test that trips it would silently change what a later analytics test sees.
+    static func resetLaunchDedupe() { sentThisLaunch.withLock { $0 = [] } }
     #endif
 }
 
@@ -236,19 +254,7 @@ extension Analytics {
                parameters: ["period": String(periodDays), "temperature": temperature.rawValue])
     }
 
-    /// A widget/App Intent was performed (e.g. from a Home Screen widget button or Siri).
-    static func widgetIntent(_ intent: String) {
-        signal("Widget.intentInvoked", parameters: ["intent": intent])
-    }
-
-    /// A sync finished successfully (queue drained + pull merged).
-    static func syncCompleted() {
-        signal("Sync.completed")
-    }
-
-    /// How a sync ended, as a closed vocabulary. ``syncCompleted()`` says only that something
-    /// moved, which a permanently parked queue row can coexist with on every sync forever — these
-    /// four tell those cases apart.
+    /// How a sync ended, as a closed vocabulary.
     enum SyncOutcome: String {
         /// Everything queued went out; nothing is left waiting.
         case drained
@@ -261,11 +267,13 @@ extension Analytics {
         case changedWithPendingWork
     }
 
-    /// The outcome of one sync run, alongside the unchanged ``syncCompleted()``.
+    /// The outcome of one sync run.
     ///
-    /// Emitted once per sync that did work or found work waiting; a pure no-op sync stays silent,
-    /// like `Sync.completed`. Everything here is a closed category or a count of queue rows —
-    /// never a record kind list, an identifier, or anything from a payload or response.
+    /// Emitted only for a sync that did something new: moved data, parked a row, or stopped on a
+    /// retryable failure. A sync that only finds the same standing backlog stays silent, so one
+    /// parked row doesn't report itself on every sync. Everything here is a closed category or a
+    /// count of queue rows, never a record kind list, an identifier, or anything from a payload or
+    /// response.
     ///
     /// `blockedNew` counts rows this sync *parked* (the same transition ``report(_:context:attempt:)``
     /// fires on); `blockedTotal` is the standing backlog afterwards, and `queued` the rows still
@@ -305,13 +313,26 @@ extension Analytics {
         signal("Sync.conflictResolved", parameters: ["choice": choice.rawValue, "kind": kind])
     }
 
-    /// A network/connectivity error with a short, non-identifying reason.
+    /// A network/connectivity error with a short, non-identifying reason. Sent once per launch
+    /// per reason.
     static func error(network reason: String) {
-        signal("Error.network", parameters: ["reason": reason])
+        signalOncePerLaunch("Error.network", parameters: ["reason": reason])
     }
 
-    /// Endpoints already reported missing this launch — see ``serverEndpointMissing(_:)``.
-    private static var reportedMissingEndpoints: Set<String> = []
+    /// Keys of the signals ``signalOncePerLaunch(_:parameters:)`` has sent. Locked because pulls
+    /// report from ``SyncActor`` while the main actor reports pushes and sign-in.
+    private static let sentThisLaunch = OSAllocatedUnfairLock(initialState: Set<String>())
+
+    /// Sends a signal only the first time this launch that this name and these parameters occur,
+    /// ignoring `attempt`, which only counts repeats. For reports about a standing condition (the
+    /// server is unreachable, an endpoint is missing) that every sync would otherwise repeat.
+    private static func signalOncePerLaunch(_ name: String, parameters: [String: String]) {
+        let key = ([name] + parameters.filter { $0.key != "attempt" }
+            .sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" })
+            .joined(separator: "|")
+        guard sentThisLaunch.withLock({ $0.insert(key).inserted }) else { return }
+        signal(name, parameters: parameters)
+    }
 
     /// An endpoint this server version doesn't have. Baby Buddy grew `pumping`, `tags` and others
     /// over its releases, and a self-hosted server is whatever version its owner last pulled — so
@@ -321,8 +342,7 @@ extension Analytics {
     /// Reported once per launch per endpoint: a missing endpoint is a fact about the server, not
     /// about this sync, and every sync would otherwise re-report it forever.
     static func serverEndpointMissing(_ endpoint: String) {
-        guard reportedMissingEndpoints.insert(endpoint).inserted else { return }
-        signal("Server.endpointMissing", parameters: ["endpoint": endpoint])
+        signalOncePerLaunch("Server.endpointMissing", parameters: ["endpoint": endpoint])
     }
 
     /// A named setting was switched on or off. Carries the setting's name and the new boolean only
@@ -567,6 +587,11 @@ extension Analytics {
     /// a validation error `fields` names the keys the server complained about — never their values;
     /// for a list decode failure `shape` names the top-level response shape, from the closed
     /// ``ListShape`` vocabulary.
+    ///
+    /// `Error.network`, and any failure on a pull (`context` starting `pull-`), is sent once per
+    /// launch per reason and context: an offline phone or a broken endpoint fails the same way on
+    /// every sync. A push or upload rejection is sent every time, because it already fires only
+    /// when its queue row is parked.
     static func report(_ error: APIError, context: String? = nil, attempt: Int? = nil) {
         var parameters: [String: String] = [:]
         if let context { parameters["context"] = context }
@@ -601,6 +626,10 @@ extension Analytics {
         case .accessGate(let gate):
             name = "Error.serverRejected"; parameters["reason"] = "accessGate"; parameters["gate"] = gate.rawValue
         }
-        signal(name, parameters: parameters)
+        if name == "Error.network" || context?.hasPrefix("pull-") == true {
+            signalOncePerLaunch(name, parameters: parameters)
+        } else {
+            signal(name, parameters: parameters)
+        }
     }
 }
