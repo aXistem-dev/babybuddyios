@@ -272,7 +272,21 @@ final class SyncEngine {
         switch mutation.op {
         case .create:
             // Creates can't conflict — the server assigns a fresh id.
-            let response = try await client.createRaw(path: mutation.kind.path, body: mutation.payload)
+            let response: Data
+            do {
+                response = try await client.createRaw(path: mutation.kind.path, body: mutation.payload)
+            } catch let rejection as APIError where rejection.rejectionRule == .overlap {
+                // A lookup that can't reach the server retries the whole create later; any other
+                // outcome without a match parks the row on the server's own reason.
+                do {
+                    guard let existing = try await existingCopy(of: mutation, client: client) else { throw rejection }
+                    response = existing
+                } catch let lookup as APIError where lookup.isRetryable {
+                    throw lookup
+                } catch {
+                    throw rejection
+                }
+            }
             applyServerResponse(response, to: entity)
             context.delete(mutation)
             return true
@@ -326,6 +340,40 @@ final class SyncEngine {
                 raiseConflict(mutation, entity: entity, serverPayload: current, serverDeleted: false)
                 return false
             }
+        }
+    }
+
+    /// The server's own copy of a create it just refused as overlapping, when that copy is this
+    /// same record: same child, same start and end to the second (the app sends whole seconds).
+    /// That happens when an earlier POST reached the server but its response was lost, so the app
+    /// treated it as offline and sent it again. It never changes a server record.
+    ///
+    /// The sync that lost the response still pulled, so the cache usually holds that record
+    /// already, as a second entry on the timeline. When that cached copy has no local edits it is
+    /// dropped in favor of the queued entity, which takes over its server id. A cached copy with
+    /// edits of its own is left alone, and the create stays parked.
+    private func existingCopy(of mutation: PendingMutation, client: APIClient) async throws -> Data? {
+        func fields(_ data: Data) -> (child: Int, start: Int, end: Int)? {
+            guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let child = obj["child"] as? Int,
+                  let start = (obj["start"] as? String).flatMap(APIDate.parse),
+                  let end = (obj["end"] as? String).flatMap(APIDate.parse) else { return nil }
+            return (child, Int(start.timeIntervalSince1970.rounded(.down)),
+                    Int(end.timeIntervalSince1970.rounded(.down)))
+        }
+        guard let wanted = fields(mutation.payload) else { return nil }
+        let start = Date(timeIntervalSince1970: TimeInterval(wanted.start))
+        let query = ListQuery(child: wanted.child, timeParam: "start",
+                              timeMin: start, timeMax: start.addingTimeInterval(1))
+        let rows = try await client.listAllRaw(path: mutation.kind.path, query: query)
+        return rows.first { row in
+            guard let found = fields(row), found == wanted,
+                  let id = (try? JSONSerialization.jsonObject(with: row) as? [String: Any])?["id"] as? Int
+            else { return false }
+            guard let cached = LocalStore.fetch(kind: mutation.kind, serverID: id, in: context) else { return true }
+            guard cached.syncState == .synced else { return false }
+            context.delete(cached)
+            return true
         }
     }
 

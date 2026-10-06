@@ -258,6 +258,15 @@ final class AnalyticsSignalTests: XCTestCase {
         XCTAssertFalse(parameters.values.contains { $0.contains("Ollie") })
     }
 
+    /// A record-level rejection names which Baby Buddy rule it was, never the message.
+    func testServerRejectedCarriesTheRuleNotTheMessage() {
+        Analytics.report(.badRequest(status: 400,
+                                     message: "Another entry intersects the specified time period. Conflicting entry: Feeding (1:09 a.m. - 1:24 a.m.)",
+                                     fields: ["non_field_errors"]))
+        XCTAssertEqual(recorder.parameters("Error.serverRejected"),
+                       ["reason": "badRequest-400", "fields": "non_field_errors", "rule": "overlap"])
+    }
+
     /// A tag pull that can't read the response is the failure this dimension exists for: `decoding`
     /// alone can't separate a server shape worth supporting from a proxy page, and the answer to
     /// those two is completely different.

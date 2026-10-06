@@ -215,4 +215,39 @@ final class LoggingTests: UITestCase {
         tap(bar.buttons["Cancel"])
         expectGone(bar)
     }
+
+    /// Baby Buddy refuses a feeding that overlaps another, so the editor names the cached one it
+    /// would overlap. Only a warning: Save stays enabled. The seeded feeding ran 90 to 70 minutes
+    /// before launch; a new one started 80 minutes ago and ending now overlaps it.
+    func testOverlappingFeedingWarnsButSaves() throws {
+        let target = Date().addingTimeInterval(-80 * 60)
+        try XCTSkipUnless(Calendar.current.isDateInToday(target), "Start would land on yesterday's date")
+        launch()
+        openEditor("Feeding")
+        let bar = expect(app.navigationBars["New Feeding"])
+        XCTAssertFalse(element(labeled: "Warning. Overlaps").exists, "start and end are both now")
+
+        // Start is the first picker; its buttons are the pair, the date, then the time.
+        tap(app.datePickers.element(boundBy: 0).buttons.element(boundBy: 2))
+        let wheels = app.pickerWheels
+        expect(wheels.element(boundBy: 1))
+        let format = DateFormatter()
+        let patterns: [String] = wheels.count == 3 ? ["h", "mm", "a"] : ["HH", "mm"]
+        for (index, pattern) in patterns.enumerated() {
+            format.dateFormat = pattern
+            wheels.element(boundBy: index).adjust(toPickerWheelValue: format.string(from: target))
+        }
+        tap(app.buttons["PopoverDismissRegion"])
+
+        expect(element(labeled: "Warning. Overlaps the"))
+        XCTAssertTrue(bar.buttons["Save"].isEnabled, "An overlap warns, it doesn't block")
+        tap(bar.buttons["Cancel"])
+        expectGone(bar)
+
+        // The seeded feeding itself, opened for editing, doesn't overlap with itself.
+        tap(app.buttons.labeled("Feeding, Breast Milk"))
+        tap(elements("label BEGINSWITH 'Feeding, Breast Milk'").firstMatch)
+        expect(app.navigationBars["Edit Feeding"])
+        XCTAssertFalse(element(labeled: "Warning. Overlaps").exists)
+    }
 }
