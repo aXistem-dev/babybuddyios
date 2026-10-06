@@ -21,7 +21,8 @@ struct QuickLogIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult {
         // The intent runs in a separate process from the app, so analytics must be started here.
-        Analytics.start()
+        // An intent run isn't a session, so it doesn't send `TelemetryDeck.Session.started`.
+        Analytics.start(sendSessionStarted: false)
         // A diaper change requires a child; fail cleanly rather than posting an invalid record.
         guard let child = SharedDefaults.selectedChildID, child > 0 else {
             throw NoChildSelectedError()
@@ -34,7 +35,6 @@ struct QuickLogIntent: AppIntent {
         // create() already fires Analytics.activityLogged for non-timer kinds, so don't double-log.
         let entity = LocalRepository(context: context).create(
             kind: action.kind, payload: action.payload(childID: child, now: .now), source: .intent)
-        Analytics.widgetIntent("QuickLog:\(action.rawValue)")
         if let entity { await TimerPush.pushCreate(localID: entity.localID, in: context) }
         WidgetCenter.shared.reloadAllTimelines()
         return .result()

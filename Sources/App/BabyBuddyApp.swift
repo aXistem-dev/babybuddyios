@@ -39,7 +39,6 @@ struct BabyBuddyApp: App {
         // `BB_UITEST`: wipe to a clean install before anything below reads defaults or the store.
         DemoData.resetForUITests(container.mainContext)
         #endif
-        Analytics.start()
         if !Self.isHostingTests {
             // Stamped before any Dashboard can ask whether a support nudge is due — every time-based
             // rule in the policy hangs off it.
@@ -57,7 +56,6 @@ struct BabyBuddyApp: App {
         UNUserNotificationCenter.current().delegate = timerAlerts
         let session = AppSession(context: container.mainContext)
         let purchases = PurchaseManager()
-        purchases.start()
         self.container = container
         _session = State(initialValue: session)
         _sync = State(initialValue: SyncEngine(session: session, context: container.mainContext))
@@ -81,6 +79,16 @@ struct BabyBuddyApp: App {
                 .onChange(of: session.isAuthenticated) { _, _ in
                     Task { await liveActivity.reconcile() }
                 }
+        }
+        // Analytics and purchases start once a scene is in the foreground, not in `init`. A
+        // background-refresh launch runs `init` too, and the SDK would count it as a session.
+        // Starting on `.inactive` rather than `.active` matters: the first screen appears in
+        // between, and a launch-time signal such as `WhatsNew.shown` would be lost. Purchases
+        // follow analytics so RevenueCat gets the TelemetryDeck identity. Repeat calls do nothing.
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            guard phase != .background else { return }
+            Analytics.start()
+            purchases.start()
         }
         .onChange(of: scenePhase) { _, phase in
             switch phase {

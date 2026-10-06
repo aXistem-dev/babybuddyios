@@ -24,6 +24,9 @@ struct InsightsView: View {
 
     private let aggregator = ChartAggregator()
 
+    /// Whether `Insights.viewed` has been sent on arrival this launch.
+    private static var viewedThisLaunch = false
+
     init(selectedChildID: Binding<Int>) {
         _selectedChildID = selectedChildID
         let child = selectedChildID.wrappedValue
@@ -66,10 +69,15 @@ struct InsightsView: View {
             .toolbar { ChildSwitcher(children: children, selectedChildID: $selectedChildID) }
             .refreshable { await sync.sync() }
             // Whether Trends earns its place in the tab bar, which window people actually reach
-            // for, and how often the temperature card has a spell to draw over it. Fires on arrival
-            // and on every change of the segmented control, which between them are the whole screen.
-            .onAppear { Analytics.insightsViewed(periodDays: period.days,
-                                                 temperature: temperatureChart(period)) }
+            // for, and how often the temperature card has a spell to draw over it. Fires on the
+            // first arrival each launch and on every change of the segmented control. Switching
+            // back to the tab again only repeats the first signal, so it isn't sent.
+            .onAppear {
+                guard !Self.viewedThisLaunch else { return }
+                Self.viewedThisLaunch = true
+                Analytics.insightsViewed(periodDays: period.days,
+                                         temperature: temperatureChart(period))
+            }
             .onChange(of: period) { _, newPeriod in
                 Analytics.insightsViewed(periodDays: newPeriod.days,
                                          temperature: temperatureChart(newPeriod))

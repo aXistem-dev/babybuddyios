@@ -2,7 +2,7 @@ import XCTest
 import SwiftData
 @testable import BabyBuddy
 
-/// Covers the change-detection that gates the `Sync.completed` analytics signal: unchanged
+/// Covers the change-detection that gates the `Sync.finished` analytics signal: unchanged
 /// server records must not dirty the store on re-pull, and a running timer's volatile
 /// `duration` must not register as a change.
 @MainActor

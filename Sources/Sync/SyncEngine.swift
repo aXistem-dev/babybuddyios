@@ -81,15 +81,11 @@ final class SyncEngine {
         // A dose or timer logged elsewhere reschedules its local notification, background syncs too.
         if pulledChanges { await LocalAlerts.shared.reconcile() }
         let changed = push.delivered > 0 || uploads.delivered > 0 || pulledChanges
-        // Only report a sync that actually did work — most syncs (foreground, pull-to-refresh,
-        // after each timer action, background) are no-ops, which would otherwise be pure noise.
-        if changed { Analytics.syncCompleted() }
         reportOutcome(push, uploads, changed: changed)
     }
 
-    /// What one pass over a queue did. `Sync.completed` says only "something moved", which a
-    /// permanently blocked row can coexist with forever; these are the facts that separate a
-    /// drained sync from a partial one. Counts and flags only — never what was in the payload.
+    /// What one pass over a queue did: the facts that separate a drained sync from a partial one.
+    /// Counts and flags only, never what was in the payload.
     struct QueueRun {
         /// Rows actually delivered to the server this pass.
         var delivered = 0
@@ -100,26 +96,28 @@ final class SyncEngine {
         var stoppedRetryable = false
     }
 
-    /// Emit `Sync.finished` — one bounded outcome per sync that did work or found work waiting.
+    /// Emit `Sync.finished` for a sync that did something new: moved data, parked a row, or
+    /// stopped on a retryable failure.
     ///
-    /// Deliberately alongside `Sync.completed` rather than replacing it: that signal backs an
-    /// existing dashboard, and its meaning ("something changed") is unchanged here.
-    ///
-    /// Same no-op suppression as `Sync.completed`: a sync that moved nothing and has nothing
-    /// queued is silent, which is most of them. `transientFailure` covers only the push/upload
-    /// queues stopping early — a failed *pull* reports itself through ``SyncActor`` with its own
-    /// category, and has no queue state to describe.
+    /// Most syncs (foreground, pull-to-refresh, after each timer action, background) do none of
+    /// those and stay silent. So does a sync that only walks past rows parked earlier or still
+    /// waiting: that backlog was reported when it formed, and reporting it again would send the
+    /// same `partialBlocked` on every sync for as long as one row stays parked. `transientFailure`
+    /// covers only the push/upload queues stopping early. A failed *pull* reports itself through
+    /// ``SyncActor`` with its own category, and has no queue state to describe.
     private func reportOutcome(_ push: QueueRun, _ uploads: QueueRun, changed: Bool) {
+        let blockedNew = push.blockedNew + uploads.blockedNew
+        let stoppedRetryable = push.stoppedRetryable || uploads.stoppedRetryable
+        guard changed || blockedNew > 0 || stoppedRetryable else { return }
         let census = queueCensus()
-        guard changed || census.queued > 0 || census.blocked > 0 else { return }
         let outcome: Analytics.SyncOutcome =
-            if push.stoppedRetryable || uploads.stoppedRetryable { .transientFailure }
+            if stoppedRetryable { .transientFailure }
             else if census.blocked > 0 { .partialBlocked }
             else if census.queued > 0 { .changedWithPendingWork }
             else { .drained }
         Analytics.syncFinished(outcome: outcome,
                                delivered: push.delivered, uploaded: uploads.delivered,
-                               blockedNew: push.blockedNew + uploads.blockedNew,
+                               blockedNew: blockedNew,
                                blockedTotal: census.blocked, queued: census.queued)
     }
 
