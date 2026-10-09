@@ -18,10 +18,13 @@ struct DashboardView: View {
 
     /// The records the Dashboard actually reads, filtered store-side: the selected child's
     /// events, every child record (for the header/switcher), and every timer (deep links can
-    /// target a timer belonging to any child). Rebuilt on child switch via `init`.
+    /// target a timer belonging to any child). Plus pumping logged on a parent and the parents,
+    /// so ``childEntities`` can show a linked parent's pumping (see ``EntityVisibility``). Rebuilt
+    /// on child switch via `init`.
     @Query private var allEntities: [LocalEntity]
-    /// Navigation path for the day-timeline pushes (in-app "Today" tiles + the status widget).
-    @State private var navPath: [EntityKind] = []
+    /// Navigation path for the day-timeline pushes (in-app "Today" tiles + the status widget) and
+    /// the milk stash screen (the stash card + `babybuddy://stash`).
+    @State private var navPath: [DashboardRoute] = []
     @State private var addKind: EntityKind?
     @State private var editing: LocalEntity?
     /// A dose whose reminder was tapped: the editor opens a new dose pre-filled from it.
@@ -39,6 +42,12 @@ struct DashboardView: View {
     /// A convert deferred until the Stop sheet finishes dismissing, so the detail editor doesn't
     /// try to present while another sheet is still on screen.
     @State private var pendingConvert: ConvertRequest?
+    /// The milk stash summary, on a server with the milk stash, for the stash card.
+    @State private var stash = StashViewModel()
+    /// The cached event types, for the Last events card and one-tap event logging.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "eventType" }) private var eventTypeRecords: [LocalEntity]
+    /// Whether the server has events; watched so the first sync that finds them shows the card.
+    @AppStorage(EventsCapability.supportedKey, store: SharedDefaults.suite) private var eventsSupported = false
 
     // MARK: Support nudge state
     //
@@ -102,8 +111,10 @@ struct DashboardView: View {
         let child = selectedChildID.wrappedValue
         let childKind = EntityKind.child.rawValue
         let timerKind = EntityKind.timer.rawValue
+        let parentLevelKinds = [EntityKind.pumping, .parent].map(\.rawValue)
         let predicate = #Predicate<LocalEntity> { entity in
             entity.childID == child || entity.kindRaw == childKind || entity.kindRaw == timerKind
+                || (entity.childID == nil && parentLevelKinds.contains(entity.kindRaw))
         }
         _allEntities = Query(filter: predicate, sort: \LocalEntity.timestamp, order: .reverse)
     }
@@ -150,6 +161,7 @@ struct DashboardView: View {
                         }
 
                         todaySection
+                        if stash.isSupported { stashCard }
                         if !latestEvents.isEmpty { latestSection }
                     }
                 }
@@ -160,8 +172,13 @@ struct DashboardView: View {
             }
             .background(BBColor.surface)
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: EntityKind.self) { kind in
-                DayTimelineView(kind: kind, childID: selectedChildID)
+            // One value-based destination for both screens: an `isPresented:` destination next to
+            // the path re-renders the stash screen in a loop, which hangs the app.
+            .navigationDestination(for: DashboardRoute.self) { route in
+                switch route {
+                case .day(let kind): DayTimelineView(kind: kind, childID: selectedChildID)
+                case .stash: StashView(childID: selectedChildID)
+                }
             }
             .overlay(alignment: .bottom) {
                 UndoToastView().padding(.bottom, 84) // clear of the floating add button
@@ -184,6 +201,14 @@ struct DashboardView: View {
             }) {
                 AllActivitiesSheet(
                     showsSickMode: sickModeStart == nil,
+                    eventTypes: eventsSupported
+                        ? EventUsage.topTypes(events: childEntities, types: eventTypes,
+                                              child: selectedChildID, now: .now)
+                        : [],
+                    onLogEvent: { slug in
+                        showAllActivities = false
+                        logEvent(slug)
+                    },
                     onPick: { kind in pendingAddKind = kind; showAllActivities = false },
                     onStartSickMode: {
                         sickMode.turnOn(selectedChildID, at: .now, source: .addSheet)
@@ -230,6 +255,7 @@ struct DashboardView: View {
             .onChange(of: router.convertTarget) { _, target in openConvert(target) }
             .onChange(of: router.openDayKind) { _, kind in openDay(kind) }
             .onChange(of: router.repeatDoseLocalID) { _, id in openRepeatDose(id) }
+            .onChange(of: router.showStash) { _, show in openStash(show) }
             .onAppear {
                 // handle a deep link that arrived before this view existed
                 showTimer(router.openTimerLocalID)
@@ -237,6 +263,7 @@ struct DashboardView: View {
                 openConvert(router.convertTarget)
                 openDay(router.openDayKind)
                 openRepeatDose(router.repeatDoseLocalID)
+                openStash(router.showStash)
                 #if DEBUG
                 if let raw = ProcessInfo.processInfo.environment["BB_OPEN"], !children.isEmpty {
                     if raw == "timer", !startingTimer {
@@ -563,10 +590,62 @@ struct DashboardView: View {
         }
     }
 
+    // MARK: Events
+
+    /// The cached event types, by name.
+    private var eventTypes: [EntityEditorView.EventTypeChoice] {
+        EntityEditorView.eventTypeChoices(eventTypeRecords, keeping: nil)
+    }
+
+    /// One tap in the Add Activity sheet: this event type, for the selected child, now. Queued like
+    /// any other record, so it works offline and can be undone from the toast.
+    private func logEvent(_ slug: String) {
+        guard let payload = EntityEditorView.eventPayloads(
+            child: selectedChildID, types: [slug], time: APIDate.isoDateTime.string(from: .now),
+            notes: "", tags: []).first else { return }
+        LocalRepository(context: context).create(kind: .event, payload: payload, source: .quickAdd)
+        Task { await sync.sync() }
+    }
+
+    // MARK: Milk stash
+
+    /// What's in the milk stash and how old it is, and how much of it this child had today. Opens
+    /// the stash screen.
+    private var stashCard: some View {
+        let summary = stash.summary
+        let balance = summary.map { EntityFormatting.formatAmount($0.balance) } ?? "\u{2014}"
+        let below = (summary?.balance ?? 0) < 0
+        let today = EntityFormatting.formatAmount(StashUse.totals(childEntities, childID: selectedChildID).today)
+        let oldest = summary?.oldest_age_hours.map { "oldest \(Int($0)) h" }
+        let detail = ["\(currentChildName) had \(today) today", oldest].compactMap { $0 }.joined(separator: " · ")
+        return Button { navPath.append(.stash) } label: {
+            BBCard {
+                HStack(spacing: 12) {
+                    ActivityTile(kind: .stashAdjustment, size: 40, glyph: 21)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Milk stash").font(.headline)
+                        Text(detail).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(balance)
+                            .font(.title3.weight(.semibold)).monospacedDigit()
+                            .foregroundStyle(below ? BBColor.danger : Color.primary)
+                        if let summary { StashStatusChip(status: summary.status) }
+                    }
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(["Milk stash", balance, summary?.status.label, detail]
+            .compactMap { $0 }.joined(separator: ", "))
+    }
+
     /// Wrap a "Today" tile so tapping it pushes a single-day, single-kind timeline slice.
     private func metricLink<Content: View>(_ kind: EntityKind,
                                            @ViewBuilder _ tile: () -> Content) -> some View {
-        NavigationLink(value: kind) { tile() }
+        NavigationLink(value: DashboardRoute.day(kind)) { tile() }
             .buttonStyle(.plain)
     }
 
@@ -674,8 +753,15 @@ struct DashboardView: View {
     /// "Today" tiles).
     private func openDay(_ kind: EntityKind?) {
         guard let kind else { return }
-        navPath = [kind]
+        navPath = [.day(kind)]
         router.openDayKind = nil
+    }
+
+    /// Push the milk stash screen for `babybuddy://stash`, on a server with the milk stash.
+    private func openStash(_ show: Bool) {
+        guard show else { return }
+        router.showStash = false
+        if StashCapability.isSupported { navPath = [.stash] }
     }
 
     /// Stop tapped: the timer stops now, here and (once the DELETE lands) on the server, then the
@@ -727,8 +813,14 @@ struct DashboardView: View {
 
     private var children: [LocalEntity] { allEntities.filter { $0.kind == .child } }
 
+    /// The selected child's records, and pumping logged on a parent linked to the child. Stash
+    /// adjustments belong on the timeline only, so the query never fetches them here.
     private var childEntities: [LocalEntity] {
-        allEntities.filter { $0.childID == selectedChildID && $0.syncState != .pendingDelete }
+        let child = selectedChildID
+        let parentIDs = EntityVisibility.parentIDs(forChild: child, in: allEntities)
+        return allEntities.filter {
+            $0.syncState != .pendingDelete && EntityVisibility.isVisible($0, forChild: child, parentIDs: parentIDs)
+        }
     }
 
     private var currentChild: LocalEntity? { children.first { $0.serverID == selectedChildID } }
@@ -750,8 +842,10 @@ struct DashboardView: View {
         childEntities.first { $0.kind == kind }
     }
 
+    /// The newest record of each kind, events too on a server with them, newest first.
     private var latestEvents: [LocalEntity] {
-        recentKinds.compactMap { lastEvent(of: $0) }.sorted { $0.timestamp > $1.timestamp }
+        (recentKinds + (eventsSupported ? [.event] : []))
+            .compactMap { lastEvent(of: $0) }.sorted { $0.timestamp > $1.timestamp }
     }
 
     /// The newest dose of each medication whose next dose is still ahead, soonest first.
@@ -916,6 +1010,10 @@ private struct QuickAddMenu: View {
 private struct AllActivitiesSheet: View {
     @Environment(\.dismiss) private var dismiss
     var showsSickMode: Bool
+    /// The child's most used event types (see ``EventUsage/topTypes``), each logged now with one
+    /// tap; empty without events.
+    var eventTypes: [EntityEditorView.EventTypeChoice] = []
+    var onLogEvent: (String) -> Void = { _ in }
     var onPick: (EntityKind) -> Void
     var onStartSickMode: () -> Void
 
@@ -929,6 +1027,7 @@ private struct AllActivitiesSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     section("Log", logKinds)
                     section("Measure", measureKinds)
+                    if !eventTypes.isEmpty { eventsSection }
                     if showsSickMode { sickModeRow }
                 }
                 .padding()
@@ -962,6 +1061,38 @@ private struct AllActivitiesSheet: View {
         .buttonStyle(.plain)
     }
 
+    /// A tile per most used event type that logs it now, and "New event…" for the editor, with every
+    /// type and several at once.
+    private var eventsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader("Events")
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(eventTypes, id: \.slug) { type in
+                    Button { onLogEvent(type.slug) } label: {
+                        tileLabel(Text(type.name), emoji: type.emoji)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Log \(type.name)")
+                    .accessibilityHint("Logs it now")
+                }
+                Button { onPick(.event) } label: {
+                    tileLabel(Text("New event\u{2026}"))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("New event\u{2026}")
+                .accessibilityHint("Choose one or more events to log")
+            }
+        }
+    }
+
+    private func tileLabel(_ title: Text, emoji: String? = nil) -> some View {
+        VStack(spacing: 7) {
+            ActivityTile(kind: .event, size: 56, glyph: 27, emoji: emoji)
+            title.font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     private func section(_ title: String, _ kinds: [EntityKind]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionHeader(title)
@@ -981,4 +1112,12 @@ private struct AllActivitiesSheet: View {
             }
         }
     }
+}
+
+/// A screen the Dashboard's navigation stack pushes.
+enum DashboardRoute: Hashable {
+    /// A "Today" tile's single-day timeline for one kind.
+    case day(EntityKind)
+    /// The milk stash screen.
+    case stash
 }

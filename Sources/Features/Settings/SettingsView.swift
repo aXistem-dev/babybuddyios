@@ -27,6 +27,9 @@ struct SettingsView: View {
 
     // Shared with the Dashboard/Timeline tabs and the widget, so "Switch" here moves them too.
     @AppStorage("selectedChildID", store: SharedDefaults.suite) private var selectedChildID = 0
+    /// What the server lets this user do with event types; watched so a sync that allows it shows
+    /// Event types.
+    @AppStorage(EventsCapability.permissionsKey, store: SharedDefaults.suite) private var eventPermissionsData: Data?
     // Mirrors SharedDefaults.liveActivitiesEnabled; keep the key and default in sync.
     @AppStorage("liveActivitiesEnabled", store: SharedDefaults.suite) private var liveActivitiesEnabled = true
     @AppStorage(SharedDefaults.stalenessThresholdKey, store: SharedDefaults.suite)
@@ -42,6 +45,9 @@ struct SettingsView: View {
     @AppStorage(ForgottenTimerPolicy.enabledKey, store: SharedDefaults.suite) private var timerAlertsEnabled = false
     // Mirrors MedicationReminderPolicy.isEnabled.
     @AppStorage(MedicationReminderPolicy.enabledKey, store: SharedDefaults.suite) private var doseRemindersEnabled = false
+    // Mirrors StashAgePolicy.isEnabled, on by default.
+    @AppStorage(StashAgePolicy.enabledKey, store: SharedDefaults.suite)
+    private var stashAlertsEnabled = StashAgePolicy.defaultOn
     @AppStorage(UndoToastCenter.enabledKey) private var undoToastEnabled = true
     // Sick mode (see ``SickMode``): the keys and defaults are the ones it reads.
     @State private var sickMode = SickModeStore.shared
@@ -106,6 +112,23 @@ struct SettingsView: View {
                     }
 
                     sectioned("Sick mode") { sickModeCard }
+
+                    if StashCapability.hasSettings { StashSettingsSection() }
+
+                    if showsEventTypes {
+                        sectioned("Events") {
+                            card {
+                                NavigationLink { EventTypesView() } label: {
+                                    SettingsRow(symbol: "tag.fill", tint: BBColor.event, title: "Event types",
+                                                subtitle: "Add, rename or delete the events you log.") {
+                                        Image(systemName: "chevron.right")
+                                            .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
 
                     sectioned("Notifications") {
                         notificationsCard
@@ -565,7 +588,21 @@ struct SettingsView: View {
             SettingsRow(symbol: "pills.fill", tint: BBColor.activity(.medication), title: "Medication reminders") {
                 Self.alertToggle("Medication reminders", $doseRemindersEnabled, setting: "medicationReminders")
             }
+
+            if StashCapability.isSupported {
+                rowDivider
+
+                SettingsRow(symbol: "clock.badge.exclamationmark", tint: BBColor.pumping, title: "Milk stash expiry") {
+                    Self.alertToggle("Milk stash expiry", $stashAlertsEnabled, setting: "stashAgeAlerts")
+                }
+            }
         }
+    }
+
+    /// Event types, on a server with events, for a user it lets add, change or delete them.
+    private var showsEventTypes: Bool {
+        _ = eventPermissionsData
+        return EventsCapability.isSupported && EventsCapability.permissions.any
     }
 
     /// A notifications switch: turning it on asks for permission, and either way the scheduled

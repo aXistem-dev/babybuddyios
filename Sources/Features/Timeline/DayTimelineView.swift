@@ -13,8 +13,9 @@ struct DayTimelineView: View {
     /// The day to scope to. Defaults to today; a parameter so it stays testable/previewable.
     let day: Date
 
-    /// This child's events of the scoped kind on the scoped day, newest first — filtered
-    /// store-side so the view never materializes the whole table.
+    /// The day's events of the scoped kind, newest first — filtered store-side by kind and day so
+    /// the view never materializes the whole table — plus the parents. ``visibleEvents`` keeps
+    /// this child's records and the childless ones it sees (parent pumping, stash adjustments).
     @Query private var events: [LocalEntity]
     @Query private var cachedTags: [CachedTag]
     @Query(filter: #Predicate<PendingMutation> { $0.dispositionRaw != nil })
@@ -29,11 +30,15 @@ struct DayTimelineView: View {
         let dayStart = Calendar.current.startOfDay(for: day)
         let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? day
         let kindRaw = kind.rawValue
+        let parentKind = EntityKind.parent.rawValue
         let pendingDelete = SyncState.pendingDelete.rawValue
+        // Not narrowed by child store-side: that clause pushed the predicate past the type-checker's
+        // limit, and ``visibleEvents`` drops other children's records anyway.
         let predicate = #Predicate<LocalEntity> { entity in
-            entity.kindRaw == kindRaw && entity.childID == childID
-                && entity.syncStateRaw != pendingDelete
-                && entity.timestamp >= dayStart && entity.timestamp < dayEnd
+            entity.syncStateRaw != pendingDelete
+                && ((entity.kindRaw == kindRaw
+                        && entity.timestamp >= dayStart && entity.timestamp < dayEnd)
+                    || (entity.kindRaw == parentKind && entity.childID == nil))
         }
         _events = Query(filter: predicate, sort: \LocalEntity.timestamp, order: .reverse)
     }
@@ -45,11 +50,25 @@ struct DayTimelineView: View {
             uniquingKeysWith: { first, _ in first })
     }
 
+    /// The fetched events this child sees (see ``EntityVisibility``); stash adjustments only on a
+    /// server with the milk stash, and events only on one with events.
+    private var visibleEvents: [LocalEntity] {
+        let parentIDs = EntityVisibility.parentIDs(forChild: childID, in: events)
+        let showsStash = StashCapability.isSupported
+        let showsEvents = EventsCapability.isSupported
+        return events.filter {
+            EntityVisibility.isVisible($0, forChild: childID, parentIDs: parentIDs)
+                && (showsStash || $0.kind != EntityKind.stashAdjustment)
+                && (showsEvents || $0.kind != EntityKind.event)
+        }
+    }
+
     var body: some View {
+        let rows = visibleEvents
         List {
-            ForEach(Array(events.enumerated()), id: \.element.localID) { index, entity in
+            ForEach(Array(rows.enumerated()), id: \.element.localID) { index, entity in
                 TimelineRailRow(entity: entity,
-                                connectsDown: index < events.count - 1,
+                                connectsDown: index < rows.count - 1,
                                 tagColors: tagColors,
                                 blocked: blockedMutations.contains { $0.localID == entity.localID })
                     .listRowInsets(EdgeInsets())
@@ -57,17 +76,22 @@ struct DayTimelineView: View {
                     .listRowBackground(Color.clear)
                     .contentShape(Rectangle())
                     .onTapGesture { editing = entity }
+                    // A bottle's linked stash discard is changed on its bottle: no Repeat, no Delete.
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        Button { repeatEvent(entity) } label: {
-                            Label("Repeat", systemImage: "arrow.clockwise")
+                        if !entity.isLinkedStashDiscard {
+                            Button { repeatEvent(entity) } label: {
+                                Label("Repeat", systemImage: "arrow.clockwise")
+                            }
+                            .tint(BBColor.repeatAction)
                         }
-                        .tint(BBColor.repeatAction)
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) { delete(entity) } label: {
-                            Label("Delete", systemImage: "trash")
+                        if !entity.isLinkedStashDiscard {
+                            Button(role: .destructive) { delete(entity) } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                            .tint(BBColor.danger)
                         }
-                        .tint(BBColor.danger)
                         Button { editing = entity } label: {
                             Label("Edit", systemImage: "pencil")
                         }
@@ -92,7 +116,7 @@ struct DayTimelineView: View {
             EntityEditorView(kind: kind, childID: childID)
         }
         .overlay {
-            if events.isEmpty { emptyState }
+            if rows.isEmpty { emptyState }
         }
         .overlay(alignment: .bottomTrailing) {
             FloatingAddButton(accessibilityLabelText: "Add \(kind.displayName)") {

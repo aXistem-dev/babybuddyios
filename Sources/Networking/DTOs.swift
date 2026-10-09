@@ -46,6 +46,27 @@ enum DiaperColor: String, Codable, CaseIterable, Identifiable {
     var label: String { rawValue.capitalized }
 }
 
+/// Which way a manual stash adjustment moves milk: into the stash, or out of it.
+enum StashKind: String, Codable, CaseIterable, Identifiable {
+    case added, discarded
+    var id: String { rawValue }
+    var sign: Double { self == .added ? 1 : -1 }
+    var label: String { self == .added ? "Added" : "Discarded" }
+}
+
+/// How old a stash lot (or the stash as a whole, by its oldest lot) is.
+enum StashStatus: String, Codable {
+    case ok, warn, expired
+
+    var label: String {
+        switch self {
+        case .ok: return "Fresh"
+        case .warn: return "Expiring soon"
+        case .expired: return "Expired"
+        }
+    }
+}
+
 // MARK: - Resources
 //
 // Each DTO carries the full set of serializer fields. Read-only fields (`id`,
@@ -79,6 +100,15 @@ struct FeedingDTO: APIResource {
     var notes: String?
     var tags: [String]?
     var timer: Int?
+    // Milk stash fields (only on a server with the milk stash).
+    /// Millilitres of this bottle taken from the stash.
+    var stash_amount: Double?
+    /// Millilitres of it discarded (spilled, left over), backed by a linked stash adjustment.
+    var stash_discarded: Double?
+    /// Free-text reason for the discard, `""` when none.
+    var stash_discard_reason: String?
+    /// The parent who breastfed; kept by the server only on breast methods.
+    var parent: Int?
 }
 
 struct DiaperChangeDTO: APIResource {
@@ -122,7 +152,11 @@ struct TummyTimeDTO: APIResource {
 struct PumpingDTO: APIResource {
     static let path = "pumping"
     var id: Int?
-    var child: Int
+    /// `nil` for pumping logged on a parent (a server with the milk stash).
+    var child: Int?
+    var parent: Int?
+    /// Millilitres of this session put into the stash.
+    var stash_amount: Double?
     var start: Date
     var end: Date
     var duration: String?
@@ -212,6 +246,107 @@ struct MedicationDTO: APIResource {
     var next_dose_interval: String?
     var notes: String?
     var tags: [String]?
+}
+
+struct ParentDTO: APIResource {
+    static let path = "parents"
+    var id: Int?
+    var first_name: String
+    var last_name: String?
+    var slug: String?
+    var picture: String?
+    var children: [Int]
+    /// Whether the parent produces breast milk: only those pump, breastfeed or own stash milk.
+    /// Missing (a server from before the flag) means true, the server's default.
+    var produces_milk: Bool?
+}
+
+/// A user-defined event type, on a server with events. Looked up by its `slug`, which is fixed when
+/// the type is created and survives a rename.
+struct EventTypeDTO: APIResource {
+    static let path = "event-types"
+    var id: Int?
+    var name: String
+    var slug: String
+    /// One emoji shown as the type's icon; `""` when unset, and absent on an older server.
+    var emoji: String?
+}
+
+/// Something that happened to a child, of one event type: `type` is that type's slug.
+struct EventDTO: APIResource {
+    static let path = "events"
+    var id: Int?
+    var child: Int
+    var type: String
+    var time: Date
+    var notes: String?
+    var tags: [String]?
+}
+
+struct StashAdjustmentDTO: APIResource {
+    static let path = "stash-adjustments"
+    var id: Int?
+    var time: Date
+    var amount: Double
+    var kind: StashKind
+    /// Free text, `""` when empty.
+    var reason: String?
+    /// `amount` signed by `kind`; read-only.
+    var signed_amount: Double?
+    var parent: Int?
+    /// Set only on a discard linked to a bottle; read-only in the app.
+    var feeding: Int?
+    var notes: String?
+    var tags: [String]?
+}
+
+/// One lot of milk still in the stash (`GET /api/stash`), oldest first.
+struct StashLotDTO: Codable, Equatable {
+    var time: Date
+    var amount: Double
+    /// The unrounded lot amount, so throwing the lot away empties it exactly. Optional so a
+    /// summary cached before the server sent it still decodes.
+    var throw_away_amount: Double?
+    var age_hours: Double
+    var warn_at: Date
+    var expires_at: Date
+    var status: StashStatus
+    /// True only on the oldest expired lot, the one milk can be thrown away from on its own.
+    var is_oldest_expired: Bool?
+    /// Whose milk the lot is: its pumping's parent, or an "added" entry's; nil for neither.
+    var parent: Int? = nil
+}
+
+/// The milk stash's server settings (`GET`/`PATCH /api/stash/settings`), on a server that has
+/// them. `can_edit` is the server's decision, never worked out by the app; it's read-only.
+struct StashSettingsDTO: Codable, Equatable {
+    /// Whether new pumping starts "Store in stash".
+    var pumping_to_stash: Bool
+    /// Whether new breast-milk bottles start "Taken from stash", once the stash is in use.
+    var bottle_from_stash: Bool
+    /// Hours after which milk is marked as expiring soon; always below `max_age_hours`.
+    var warn_age_hours: Int
+    /// Hours after which milk has expired and should be thrown away.
+    var max_age_hours: Int
+    var can_edit: Bool
+}
+
+/// The server's milk stash summary (`GET /api/stash`). The server is authoritative: it runs FIFO
+/// over the whole history, which the app only syncs a recent window of.
+struct StashSummaryDTO: Codable, Equatable {
+    struct Defaults: Codable, Equatable { var pumping_to_stash: Bool; var bottle_from_stash: Bool }
+    /// Can be negative.
+    var balance: Double
+    var status: StashStatus
+    var warn_age_hours: Double
+    var max_age_hours: Double
+    var oldest: Date?
+    var oldest_age_hours: Double?
+    var lots: [StashLotDTO]
+    var defaults: Defaults
+    /// When the balance last dropped below zero; nil while it isn't (or from a server that doesn't
+    /// send it). Identifies the current dip, so a dismissed warning returns for the next one.
+    var negative_since: Date? = nil
 }
 
 struct TagDTO: Codable, Identifiable, Hashable {

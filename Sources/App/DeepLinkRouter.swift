@@ -39,6 +39,10 @@ final class DeepLinkRouter {
     /// next one from. Cleared once handled.
     var repeatDoseLocalID: UUID?
 
+    /// Set by `babybuddy://stash`: open the milk stash screen on Home (on a server with the milk
+    /// stash). Cleared once handled.
+    var showStash = false
+
     /// Set when a link asks to present the supporter screen; cleared once handled. Nothing in the
     /// app emits `babybuddy://supporter` today, but the route stays live so an existing link still
     /// lands somewhere sensible.
@@ -66,6 +70,9 @@ final class DeepLinkRouter {
             return true
         case "dose": // babybuddy://dose/<localID> — log the next dose of that medication
             if let id = parts.first.flatMap(UUID.init(uuidString:)) { repeatDoseLocalID = id }
+            return true
+        case "stash": // babybuddy://stash — open the milk stash screen
+            showStash = true
             return true
         case "supporter": // babybuddy://supporter — present the supporter screen
             showSupporter = true

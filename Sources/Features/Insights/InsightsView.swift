@@ -56,7 +56,9 @@ struct InsightsView: View {
                     feedingCard
                     diaperCard
                     tummyTimeCard
-                    pumpingCard
+                    // With the milk stash, pumping is a parent's, not the child's: its chart is on
+                    // the stash screen, per parent.
+                    if !StashCapability.isSupported { pumpingCard }
                     temperatureCard
                 }
                 .padding(.horizontal)
@@ -463,8 +465,8 @@ private struct ChartCard<Content: View>: View {
 
 /// Consistent x-axis across the charts: fewer labels as the window widens, so ticks stay
 /// legible and Dynamic Type-friendly. 7 days shows weekday initials; wider windows show the
-/// day of the month.
-private struct DayAxis: ViewModifier {
+/// day of the month. Also used by the milk stash screen's pumping charts.
+struct DayAxis: ViewModifier {
     let period: ChartPeriod
 
     func body(content: Content) -> some View {

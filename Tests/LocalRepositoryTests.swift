@@ -153,6 +153,47 @@ final class LocalRepositoryTests: XCTestCase {
         XCTAssertEqual(time.timeIntervalSince(now), 0, accuracy: 1)
     }
 
+    /// Repeating a free stash entry logs a new one now: the server's computed signed amount and the
+    /// bottle link are dropped, and it stays off any child. A bottle's linked discard is never
+    /// offered a repeat (``LocalEntity/isLinkedStashDiscard``).
+    func testRepeatStashEntryDropsComputedFields() throws {
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "id": 7, "time": "2024-01-15T10:00:00-05:00", "amount": 5.0, "kind": "discarded",
+            "reason": "Spilled", "signed_amount": -5.0, "parent": 1, "feeding": NSNull(),
+            "notes": "", "tags": [String]()] as [String: Any])
+        let entry = LocalStore.upsertFromServer(payload, kind: .stashAdjustment, in: context)!
+        XCTAssertFalse(entry.isLinkedStashDiscard)
+
+        let now = Date()
+        let copy = repo.repeatEvent(entry, now: now)!
+        let p = copy.payloadObject
+        XCTAssertNil(p["id"])
+        XCTAssertNil(p["signed_amount"])
+        XCTAssertNil(p["feeding"])
+        XCTAssertNil(p["child"])
+        XCTAssertNil(copy.childID)
+        XCTAssertEqual(p["kind"] as? String, "discarded")
+        XCTAssertEqual(p["amount"] as? Double, 5)
+        XCTAssertEqual(p["reason"] as? String, "Spilled")
+        XCTAssertEqual(p["parent"] as? Int, 1)
+        let time = APIDate.parse(p["time"] as! String)!
+        XCTAssertEqual(time.timeIntervalSince(now), 0, accuracy: 1)
+        XCTAssertEqual(copy.syncState, .pendingCreate)
+    }
+
+    func testLinkedStashDiscardIsRecognized() throws {
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "id": 8, "time": "2024-01-15T10:00:00-05:00", "amount": 10.0, "kind": "discarded",
+            "reason": "Spilled", "signed_amount": -10.0, "parent": 1, "feeding": 4010] as [String: Any])
+        let linked = LocalStore.upsertFromServer(payload, kind: .stashAdjustment, in: context)!
+        XCTAssertTrue(linked.isLinkedStashDiscard)
+        XCTAssertEqual(linked.stashFeedingID, 4010)
+        // A feeding's own payload has no `feeding` key; nothing else counts as a linked discard.
+        let note = repo.create(kind: .note, payload: ["child": 1, "time": "2024-01-15T10:00:00-05:00",
+                                                      "note": "x", "feeding": 3])!
+        XCTAssertFalse(note.isLinkedStashDiscard)
+    }
+
     func testEnqueueImageUploadQueuesAndPreviewsLocally() throws {
         let note = repo.create(kind: .note, payload: ["child": 1, "time": "2024-01-15T10:00:00-05:00", "note": "x"])!
         repo.enqueueImageUpload(for: note, imageData: Data([0x1, 0x2, 0x3]))

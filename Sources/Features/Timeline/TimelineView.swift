@@ -11,7 +11,9 @@ struct TimelineView: View {
     @Binding var selectedChildID: Int
 
     /// The selected child's timeline events, filtered store-side (child, kind, delete state) so
-    /// the view never materializes the whole table. Rebuilt on child switch via `init`.
+    /// the view never materializes the whole table. Rebuilt on child switch via `init`. Also holds
+    /// the records with no child that may belong to this child's parents (parent pumping, stash
+    /// adjustments) and the parents themselves; ``EntityVisibility`` sorts those out in memory.
     @Query private var events: [LocalEntity]
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
@@ -34,9 +36,11 @@ struct TimelineView: View {
         _selectedChildID = selectedChildID
         let child = selectedChildID.wrappedValue
         let kinds = EntityKind.timelineKinds.map(\.rawValue)
+        let parentLevelKinds = [EntityKind.pumping, .stashAdjustment, .parent].map(\.rawValue)
         let pendingDelete = SyncState.pendingDelete.rawValue
         let predicate = #Predicate<LocalEntity> { entity in
-            entity.childID == child && kinds.contains(entity.kindRaw)
+            ((entity.childID == child && kinds.contains(entity.kindRaw))
+                || (entity.childID == nil && parentLevelKinds.contains(entity.kindRaw)))
                 && entity.syncStateRaw != pendingDelete
         }
         _events = Query(filter: predicate, sort: \LocalEntity.timestamp, order: .reverse)
@@ -72,17 +76,22 @@ struct TimelineView: View {
                             .listRowBackground(Color.clear)
                             .contentShape(Rectangle())
                             .onTapGesture { editing = entity }
+                            // A bottle's linked stash discard is changed on its bottle: no Repeat, no Delete.
                             .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                                Button { repeatEvent(entity) } label: {
-                                    Label("Repeat", systemImage: "arrow.clockwise")
+                                if !entity.isLinkedStashDiscard {
+                                    Button { repeatEvent(entity) } label: {
+                                        Label("Repeat", systemImage: "arrow.clockwise")
+                                    }
+                                    .tint(BBColor.repeatAction)
                                 }
-                                .tint(BBColor.repeatAction)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                Button(role: .destructive) { delete(entity) } label: {
-                                    Label("Delete", systemImage: "trash")
+                                if !entity.isLinkedStashDiscard {
+                                    Button(role: .destructive) { delete(entity) } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    .tint(BBColor.danger)
                                 }
-                                .tint(BBColor.danger)
                                 Button { editing = entity } label: {
                                     Label("Edit", systemImage: "pencil")
                                 }
@@ -226,13 +235,21 @@ struct TimelineView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
-    /// The store-side query already scoped to child/kind/delete-state; this applies the cheap
-    /// user filters (kind picker, date range) before the substring search, so the haystack is
-    /// only built for the already-narrowed set.
+    /// The store-side query already scoped to child/kind/delete-state; this keeps what the child
+    /// sees of the parent-level records (stash adjustments only on a server with the milk stash),
+    /// then applies the cheap user filters (kind picker, date range) before the substring search,
+    /// so the haystack is only built for the already-narrowed set.
     private var visibleEntities: [LocalEntity] {
         let childName = selectedChildName
+        let child = selectedChildID
+        let parentIDs = EntityVisibility.parentIDs(forChild: child, in: events)
+        let showsStash = StashCapability.isSupported
+        let showsEvents = EventsCapability.isSupported
         return events.filter {
-            (kindFilter == nil || $0.kind == kindFilter)
+            guard EntityVisibility.isVisible($0, forChild: child, parentIDs: parentIDs),
+                  showsStash || $0.kind != EntityKind.stashAdjustment,
+                  showsEvents || $0.kind != EntityKind.event else { return false }
+            return (kindFilter == nil || $0.kind == kindFilter)
                 && TimelineFiltering.inDateRange($0.timestamp, from: dateFrom, to: dateTo)
                 && TimelineFiltering.matchesSearch($0, query: searchText, childName: childName)
         }
@@ -384,7 +401,7 @@ struct TimelineRailRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
-            RailNode(kind: entity.kind, connectsDown: connectsDown)
+            RailNode(kind: entity.kind, emoji: entity.eventEmoji, connectsDown: connectsDown)
             card.padding(.bottom, 9)
         }
         .padding(.horizontal, 16)
@@ -472,12 +489,14 @@ private struct RailNode: View {
     // clipping the glyph at large accessibility text sizes.
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
     let kind: EntityKind
+    /// An event type's emoji, drawn instead of the glyph.
+    var emoji: String? = nil
     let connectsDown: Bool
 
     private var columnWidth: CGFloat { 40 * min(typeScale, 1.6) }
 
     var body: some View {
-        ActivityTile(kind: kind, size: 38, glyph: 20)
+        ActivityTile(kind: kind, size: 38, glyph: 20, emoji: emoji)
             .padding(.top, 5)
             .frame(width: columnWidth, alignment: .top)
             .frame(maxHeight: .infinity, alignment: .top)
@@ -502,6 +521,14 @@ private struct TimelineFiltersView: View {
 
     private var hasActiveFilters: Bool { kindFilter != nil || dateFrom != nil || dateTo != nil }
 
+    /// The timeline's kinds, less the stash adjustment on a server without the milk stash and the
+    /// event on one without events, which have no such records to filter to.
+    private var filterKinds: [EntityKind] {
+        EntityKind.timelineKinds.filter {
+            ($0 != .stashAdjustment || StashCapability.isSupported) && ($0 != .event || EventsCapability.isSupported)
+        }
+    }
+
     /// Default seed when a date bound is first enabled: 30 days back for "from", today for "to".
     private var defaultFrom: Date {
         Calendar.current.date(byAdding: .day, value: -30, to: Calendar.current.startOfDay(for: .now)) ?? .now
@@ -513,9 +540,14 @@ private struct TimelineFiltersView: View {
                 Section("Activity Type") {
                     Picker("Type", selection: $kindFilter) {
                         Text("All Types").tag(EntityKind?.none)
-                        ForEach(EntityKind.timelineKinds) { kind in
+                        ForEach(filterKinds) { kind in
                             Text(kind.displayName).tag(EntityKind?.some(kind))
                         }
+                    }
+                }
+                if kindFilter == .event, EventsCapability.permissions.any {
+                    Section {
+                        NavigationLink("Manage event types") { EventTypesView() }
                     }
                 }
                 Section("Date Range") {

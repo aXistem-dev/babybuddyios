@@ -82,6 +82,8 @@ final class SyncEngine {
         if pulledChanges { await LocalAlerts.shared.reconcile() }
         let changed = push.delivered > 0 || uploads.delivered > 0 || pulledChanges
         reportOutcome(push, uploads, changed: changed)
+        // The stash summary is re-read from here (``StashViewModel``), after the pull cached it.
+        NotificationCenter.default.post(name: .syncDidFinish, object: nil)
     }
 
     /// What one pass over a queue did: the facts that separate a drained sync from a partial one.
@@ -522,6 +524,10 @@ final class SyncEngine {
         #if DEBUG
         if session.isDemo {
             DemoData.seedIfNeeded(into: context)
+            // The seed refreshes the cached stash summary on every demo pull, but a demo pull
+            // reports no change, so `sync()` wouldn't reconcile after it: the milk stash expiry alerts
+            // catch up here.
+            await LocalAlerts.shared.reconcile()
             lastSyncDate = .now
             status = .idle
             return false

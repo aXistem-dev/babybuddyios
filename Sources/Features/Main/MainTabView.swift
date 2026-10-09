@@ -56,6 +56,9 @@ struct MainTabView: View {
         .onChange(of: router.openDayKind) { _, kind in
             if kind != nil { selectedTab = 0 } // a status-widget tile targets the Home tab
         }
+        .onChange(of: router.showStash) { _, show in
+            if show { selectedTab = 0 } // the milk stash opens on the Home tab
+        }
         .onChange(of: router.showTimelineKind) { _, kind in
             if kind != nil { selectedTab = 1 } // a Latest row targets the Timeline tab
         }

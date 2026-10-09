@@ -5,10 +5,18 @@ import Foundation
 /// family data (no dates, durations, amounts, or child ids).
 enum ActivityProblem: Equatable {
     case amountRequired
+    case stashAmountRequired
     case valueRequired
     case notANumber
     case noteRequired
     case medicationNameRequired
+    case parentRequired
+    case noParents
+    case storedAmountInvalid
+    case stashBottleAmountRequired
+    case stashTakenInvalid
+    case discardedAmountRequired
+    case eventTypeRequired
     case startAfterEnd
     case over24Hours
     case futureTimestamp
@@ -18,10 +26,18 @@ enum ActivityProblem: Equatable {
     var message: String {
         switch self {
         case .amountRequired:        return "Enter how much was pumped — Baby Buddy needs an amount."
+        case .stashAmountRequired:   return "Enter how much milk, more than 0 ml."
         case .valueRequired:         return "Enter a value."
         case .notANumber:            return "That isn't a number Baby Buddy can read. Use digits, like 90 or 4.5."
         case .noteRequired:          return "Write something for this note."
         case .medicationNameRequired: return "Enter the medication name."
+        case .parentRequired:        return "Choose who pumped."
+        case .noParents:             return "Add a parent in Baby Buddy to log pumping."
+        case .storedAmountInvalid:   return "The amount stored has to be more than 0 ml and no more than the amount pumped. Change it under More."
+        case .stashBottleAmountRequired: return "Enter an amount to take from the stash."
+        case .stashTakenInvalid:     return "The amount from the stash has to be more than 0 ml and no more than the amount fed. Change it under More."
+        case .discardedAmountRequired: return "Enter how much was discarded, at least 0.1 ml."
+        case .eventTypeRequired:     return "Choose at least one event type."
         case .startAfterEnd:         return "The start time is after the end time."
         case .over24Hours:           return "Baby Buddy won't accept more than 24 hours between start and end."
         case .futureTimestamp:       return "That time is in the future — Baby Buddy only accepts times up to now."
@@ -51,6 +67,24 @@ struct ActivityDraft {
     var dosage = ""
     var noteText = ""
     var medName = ""
+    /// Who pumped. On a server with the milk stash (`requiresParent`) pumping is logged on a
+    /// parent, so it needs one.
+    var parentID: Int?
+    var requiresParent = false
+    /// Whether any parent who produces milk is on offer. With none the picker is hidden, so "Choose
+    /// who pumped." would point at nothing: the parent has to be added on the server first.
+    var hasParents = true
+    // The milk stash, on a server with it (the editor sets these only there): pumping with
+    // "Store in stash" on, or a breast-milk bottle with "Taken from stash" on; the amount stored or
+    // taken ("More"; blank means the whole amount); and, on such a bottle, any of it discarded.
+    var storesInStash = false
+    var takesFromStash = false
+    var stashAmount = ""
+    var discardsSome = false
+    var discardedAmount = ""
+    /// How many event types an event has chosen: one when editing, one or more when logging several
+    /// at once.
+    var eventTypeCount = 0
     /// Injected so the future-timestamp rules are testable against a fixed clock.
     var now = Date()
 
@@ -61,9 +95,10 @@ struct ActivityDraft {
         case .feeding:
             // Amount is optional upstream, but a value that doesn't parse used to be dropped
             // silently — if something was typed it has to be a number.
-            return amountProblem(required: false) ?? durationProblem(futureEnd: false)
+            return amountProblem(required: false) ?? stashBottleProblem ?? durationProblem(futureEnd: false)
         case .pumping:
-            return amountProblem(required: true) ?? durationProblem(futureEnd: false)
+            return amountProblem(required: true) ?? parentProblem ?? storedAmountProblem
+                ?? durationProblem(futureEnd: false)
         case .sleep, .tummyTime:
             return durationProblem(futureEnd: true)
         case .change:
@@ -78,7 +113,12 @@ struct ActivityDraft {
             if medName.trimmingCharacters(in: .whitespaces).isEmpty { return .medicationNameRequired }
             if !dosage.trimmingCharacters(in: .whitespaces).isEmpty, Self.number(dosage) == nil { return .notANumber }
             return isFuture(time) ? .futureTimestamp : nil
-        case .timer, .child:
+        case .stashAdjustment:
+            return stashAmountProblem ?? (isFuture(time) ? .futureTimestamp : nil)
+        case .event:
+            if eventTypeCount == 0 { return .eventTypeRequired }
+            return isFuture(time) ? .futureTimestamp : nil
+        case .timer, .child, .parent, .eventType:
             return nil // not editable in this form
         }
     }
@@ -89,6 +129,47 @@ struct ActivityDraft {
         if amount.trimmingCharacters(in: .whitespaces).isEmpty { return required ? .amountRequired : nil }
         guard let parsed = Self.number(amount), parsed >= 0 else { return .notANumber }
         return nil
+    }
+
+    /// A stash entry moves some milk: an amount above zero.
+    private var stashAmountProblem: ActivityProblem? {
+        if amount.trimmingCharacters(in: .whitespaces).isEmpty { return .stashAmountRequired }
+        guard let parsed = Self.number(amount) else { return .notANumber }
+        return parsed > 0 ? nil : .stashAmountRequired
+    }
+
+    private var parentProblem: ActivityProblem? {
+        guard requiresParent, parentID == nil else { return nil }
+        return hasParents ? .parentRequired : .noParents
+    }
+
+    /// Pumping into the stash: the amount stored, when typed, is above zero and at most the amount
+    /// (upstream `validate_pumping_stash_amount`). An amount of 0 stores nothing, so there's nothing
+    /// to check: the editor then sends no stash amount.
+    private var storedAmountProblem: ActivityProblem? {
+        guard storesInStash, let pumped = Self.number(amount), pumped > 0 else { return nil }
+        return stashPartProblem(of: pumped, invalid: .storedAmountInvalid)
+    }
+
+    /// A bottle taken from the stash takes an amount above zero, and at most that from the stash
+    /// (upstream `Feeding.clean`). Anything discarded from it is at least 0.1 ml, the serializer's
+    /// minimum.
+    private var stashBottleProblem: ActivityProblem? {
+        guard takesFromStash else { return nil }
+        guard let fed = Self.number(amount), fed > 0 else { return .stashBottleAmountRequired }
+        if let problem = stashPartProblem(of: fed, invalid: .stashTakenInvalid) { return problem }
+        guard discardsSome else { return nil }
+        if discardedAmount.trimmingCharacters(in: .whitespaces).isEmpty { return .discardedAmountRequired }
+        guard let discarded = Self.number(discardedAmount) else { return .notANumber }
+        return discarded >= 0.1 ? nil : .discardedAmountRequired
+    }
+
+    /// The stored or taken amount against the whole: blank follows the whole, so it's fine. An edit
+    /// that lowers the amount below what was stored lands here too.
+    private func stashPartProblem(of whole: Double, invalid: ActivityProblem) -> ActivityProblem? {
+        if stashAmount.trimmingCharacters(in: .whitespaces).isEmpty { return nil }
+        guard let part = Self.number(stashAmount) else { return .notANumber }
+        return part > 0 && part <= whole ? nil : invalid
     }
 
     private var valueProblem: ActivityProblem? {

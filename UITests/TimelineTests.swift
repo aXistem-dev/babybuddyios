@@ -37,6 +37,38 @@ final class TimelineTests: UITestCase {
         expect(changes.firstMatch)
     }
 
+    /// A regular server has no milk stash, so its type filter offers no stash adjustments; a server
+    /// with the stash does. It sits right after Pumping, so it's on screen when the menu opens.
+    func testStashAdjustmentFilterOnlyWithTheStash() {
+        launch(["BB_START_TAB": "timeline", "BB_NO_STASH": "1"])
+        tap(app.buttons["Filters"])
+        expect(app.navigationBars["Filters"])
+        tap(app.buttons.labeled("Type"))
+        expect(app.buttons["Pumping"])
+        XCTAssertFalse(app.buttons["Stash adjustment"].exists, "No stash UI on a server without the stash")
+
+        launch(["BB_START_TAB": "timeline"])
+        tap(app.buttons["Filters"])
+        expect(app.navigationBars["Filters"])
+        tap(app.buttons.labeled("Type"))
+        expect(app.buttons["Stash adjustment"])
+    }
+
+    /// Pumping logged on a parent has no child, and neither does a stash adjustment; both show on
+    /// the timeline of a child linked to that parent. The demo's are Robin's 240 ml session (demo
+    /// history pumps 60–140 ml) and the donor milk added to the stash.
+    func testParentPumpingAndStashAdjustmentsOnChildTimeline() {
+        launch(["BB_START_TAB": "timeline"])
+        let search = app.searchFields.firstMatch
+        tap(search)
+        search.typeText("240")
+        expect(elements("label BEGINSWITH 'Pumping, ' AND label CONTAINS '240 ml'").firstMatch)
+
+        tap(search.buttons["Clear text"])
+        search.typeText("donor")
+        expect(element(labeled: "Stash adjustment, Added · 60 ml · Donor milk"))
+    }
+
     /// History pages back a window at a time and stops at the child's birthday rather than asking
     /// the server forever (#17). Demo mode reveals a fixed historic set the same way a pull would.
     ///

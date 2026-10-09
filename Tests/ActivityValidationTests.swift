@@ -185,6 +185,115 @@ final class ActivityValidationTests: XCTestCase {
         XCTAssertNil(ActivityDraft(kind: .pumping, start: started, end: now, amount: "90", now: now).problem)
     }
 
+    /// On a server with the milk stash pumping is logged on a parent, so it needs one; without it,
+    /// no parent is asked for.
+    func testPumpingNeedsParentWhenStashCapable() {
+        let unchosen = ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: "90",
+                                     requiresParent: true, now: now)
+        XCTAssertEqual(unchosen.problem, .parentRequired)
+        XCTAssertEqual(ActivityProblem.parentRequired.message, "Choose who pumped.")
+        XCTAssertNil(ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: "90",
+                                   parentID: 7, requiresParent: true, now: now).problem)
+        XCTAssertNil(ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: "90", now: now).problem)
+        XCTAssertNil(ActivityDraft(kind: .feeding, start: hourAgo, end: now, requiresParent: true, now: now).problem,
+                     "Only pumping is logged on a parent")
+    }
+
+    /// With no parent cached at all the picker is hidden, so the block says to add one on the
+    /// server rather than to choose one.
+    func testPumpingWithNoParentsCachedAsksToAddOne() {
+        let none = ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: "90",
+                                 requiresParent: true, hasParents: false, now: now)
+        XCTAssertEqual(none.problem, .noParents)
+        XCTAssertEqual(ActivityProblem.noParents.message, "Add a parent in Baby Buddy to log pumping.")
+        let unchosen = ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: "90",
+                                     requiresParent: true, hasParents: true, now: now)
+        XCTAssertEqual(unchosen.problem, .parentRequired)
+        XCTAssertNil(ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: "90",
+                                   hasParents: false, now: now).problem, "Without the milk stash no parent is asked for")
+    }
+
+    // MARK: Milk stash amounts
+
+    private func pumping(amount: String, stored: String, storesInStash: Bool = true) -> ActivityDraft {
+        ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: amount, parentID: 7, requiresParent: true,
+                      storesInStash: storesInStash, stashAmount: stored, now: now)
+    }
+
+    private func bottle(amount: String, fromStash: String = "", discards: Bool = false,
+                        discarded: String = "", takesFromStash: Bool = true) -> ActivityDraft {
+        ActivityDraft(kind: .feeding, start: hourAgo, end: now, amount: amount, takesFromStash: takesFromStash,
+                      stashAmount: fromStash, discardsSome: discards, discardedAmount: discarded, now: now)
+    }
+
+    /// The amount stored is above zero and at most the amount pumped (blank follows the amount).
+    func testStoredAmountAboveZeroAndAtMostTheAmount() {
+        XCTAssertNil(pumping(amount: "130", stored: "").problem)
+        XCTAssertNil(pumping(amount: "130", stored: "120").problem)
+        XCTAssertNil(pumping(amount: "130", stored: "130").problem)
+        XCTAssertEqual(pumping(amount: "130", stored: "140").problem, .storedAmountInvalid)
+        XCTAssertEqual(pumping(amount: "130", stored: "0").problem, .storedAmountInvalid)
+        XCTAssertEqual(pumping(amount: "130", stored: "lots").problem, .notANumber)
+        XCTAssertNil(pumping(amount: "130", stored: "140", storesInStash: false).problem, "Not going into the stash")
+    }
+
+    /// Nothing pumped stores nothing: Save isn't blocked, and the payload sends no stash amount.
+    func testZeroPumpingAmountSkipsTheStoredCheck() {
+        XCTAssertNil(pumping(amount: "0", stored: "0").problem)
+        XCTAssertNil(pumping(amount: "0", stored: "40").problem)
+    }
+
+    /// An edit that lowers the amount below what was stored is caught, so it can be adjusted.
+    func testLoweringTheAmountBelowWhatWasStoredIsCaught() {
+        XCTAssertEqual(pumping(amount: "100", stored: "120").problem, .storedAmountInvalid)
+        XCTAssertEqual(bottle(amount: "40", fromStash: "60").problem, .stashTakenInvalid)
+    }
+
+    /// A bottle taken from the stash needs an amount, and takes at most that from the stash.
+    func testBottleFromStashNeedsAnAmount() {
+        XCTAssertEqual(bottle(amount: "").problem, .stashBottleAmountRequired)
+        XCTAssertEqual(bottle(amount: "0").problem, .stashBottleAmountRequired)
+        XCTAssertEqual(ActivityProblem.stashBottleAmountRequired.message, "Enter an amount to take from the stash.")
+        XCTAssertEqual(bottle(amount: "x").problem, .notANumber)
+        XCTAssertNil(bottle(amount: "90").problem)
+        XCTAssertNil(bottle(amount: "90", fromStash: "60").problem)
+        XCTAssertEqual(bottle(amount: "90", fromStash: "100").problem, .stashTakenInvalid)
+        XCTAssertEqual(bottle(amount: "90", fromStash: "0").problem, .stashTakenInvalid)
+        XCTAssertEqual(bottle(amount: "90", fromStash: "abc").problem, .notANumber)
+    }
+
+    /// Some of it discarded: at least 0.1 ml, the server's minimum.
+    func testDiscardedAmountIsAtLeastATenth() {
+        XCTAssertEqual(bottle(amount: "90", discards: true).problem, .discardedAmountRequired)
+        XCTAssertEqual(bottle(amount: "90", discards: true, discarded: "0").problem, .discardedAmountRequired)
+        XCTAssertEqual(bottle(amount: "90", discards: true, discarded: "0.05").problem, .discardedAmountRequired)
+        XCTAssertEqual(bottle(amount: "90", discards: true, discarded: "some").problem, .notANumber)
+        XCTAssertNil(bottle(amount: "90", discards: true, discarded: "0,1").problem)
+        XCTAssertNil(bottle(amount: "90", discards: true, discarded: "10").problem)
+        XCTAssertNil(bottle(amount: "90", discards: false, discarded: "0").problem, "Discard off: not checked")
+    }
+
+    /// Without the milk stash (or with its switches off) a feeding keeps upstream's rules: the
+    /// amount is optional and nothing else is checked.
+    func testRegularServerSkipsStashChecks() {
+        XCTAssertNil(bottle(amount: "", fromStash: "500", discards: true, takesFromStash: false).problem)
+        XCTAssertNil(ActivityDraft(kind: .feeding, start: hourAgo, end: now, stashAmount: "500",
+                                   discardsSome: true, now: now).problem)
+        XCTAssertNil(ActivityDraft(kind: .pumping, start: hourAgo, end: now, amount: "90", stashAmount: "500",
+                                   now: now).problem)
+    }
+
+    /// A stash entry needs an amount above zero, at a time that isn't in the future.
+    func testStashEntryNeedsAmount() {
+        XCTAssertEqual(ActivityDraft(kind: .stashAdjustment, time: now, now: now).problem, .stashAmountRequired)
+        XCTAssertEqual(ActivityDraft(kind: .stashAdjustment, time: now, amount: "0", now: now).problem,
+                       .stashAmountRequired)
+        XCTAssertEqual(ActivityDraft(kind: .stashAdjustment, time: now, amount: "abc", now: now).problem, .notANumber)
+        XCTAssertEqual(ActivityDraft(kind: .stashAdjustment, time: now.addingTimeInterval(3600), amount: "20",
+                                     now: now).problem, .futureTimestamp)
+        XCTAssertNil(ActivityDraft(kind: .stashAdjustment, time: now, amount: "20,5", now: now).problem)
+    }
+
     func testUneditableKindsAreNeverBlocked() {
         XCTAssertNil(ActivityDraft(kind: .timer, now: now).problem)
         XCTAssertNil(ActivityDraft(kind: .child, now: now).problem)
@@ -192,11 +301,13 @@ final class ActivityValidationTests: XCTestCase {
 
     func testEveryProblemHasAMessage() {
         let problems: [ActivityProblem] = [
-            .amountRequired, .valueRequired, .notANumber, .noteRequired, .medicationNameRequired,
+            .amountRequired, .stashAmountRequired, .valueRequired, .notANumber, .noteRequired, .medicationNameRequired, .parentRequired,
+            .noParents, .storedAmountInvalid, .stashBottleAmountRequired, .stashTakenInvalid, .discardedAmountRequired,
             .startAfterEnd, .over24Hours, .futureTimestamp, .futureDate,
         ]
         for problem in problems {
             XCTAssertFalse(problem.message.isEmpty, "\(problem)")
+            XCTAssertTrue(problem.message.hasSuffix("."), "\(problem)")
         }
     }
 

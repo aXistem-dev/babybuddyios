@@ -33,7 +33,11 @@ enum DemoData {
     @MainActor
     static func seedIfNeeded(into context: ModelContext) {
         let existing = (try? context.fetch(FetchDescriptor<LocalEntity>()))?.isEmpty ?? true
-        guard existing else { return }
+        guard existing else {
+            refreshDemoStash(in: context)
+            refreshDemoEvents(in: context)
+            return
+        }
 
         insert(.child, id: 1, [
             "id": 1, "first_name": "Maya", "last_name": "Guy",
@@ -89,6 +93,12 @@ enum DemoData {
         ], context)
 
         seedHistory(into: context)
+        if ProcessInfo.processInfo.environment["BB_NO_STASH"] != "1" {
+            seedStash(into: context)
+        }
+        if ProcessInfo.processInfo.environment["BB_NO_EVENTS"] != "1" {
+            seedEvents(into: context)
+        }
 
         if ProcessInfo.processInfo.environment["BB_SEED_CONFLICT"] == "1" {
             seedConflict(into: context)
@@ -103,6 +113,316 @@ enum DemoData {
             seedSecondChild(into: context)
         }
         try? context.save()
+        refreshDemoStash(in: context)
+        refreshDemoEvents(in: context)
+    }
+
+    // MARK: Events
+
+    /// Events, as a server with them would hold them: six event types, five with an emoji, and
+    /// events of three of them for the demo child, among them a massage and a nail trim logged together
+    /// at the identical time (one event per type, as the app logs several at once). ids 5000+
+    /// (types 1–6).
+    @MainActor
+    private static func seedEvents(into context: ModelContext) {
+        let now = Date()
+        func iso(_ hoursAgo: Double) -> String {
+            APIDate.isoDateTime.string(from: now.addingTimeInterval(-hoursAgo * 3600))
+        }
+        // Outfit change has no emoji, so the symbol it falls back to shows too. Six types, so the
+        // Add Activity sheet's top five leaves one out.
+        for (id, name, slug, emoji) in [(1, "Massage", "massage", "\u{1F486}"),
+                                        (2, "Nail trim", "nail-trim", "\u{2702}\u{FE0F}"),
+                                        (3, "Outfit change", "outfit-change", ""),
+                                        (4, "Tooth brushing", "tooth-brushing", "\u{1FAA5}"),
+                                        (5, "Sunscreen", "sunscreen", "\u{1F9F4}"),
+                                        (6, "Haircut", "haircut", "\u{1F488}")] {
+            insert(.eventType, id: id, ["id": id, "name": name, "slug": slug, "emoji": emoji], context)
+        }
+        let together = iso(26)
+        for (id, type, time) in [(5000, "massage", iso(50)), (5001, "massage", together),
+                                 (5002, "nail-trim", together), (5003, "outfit-change", iso(3))] {
+            insert(.event, id: id, [
+                "id": id, "child": 1, "type": type, "time": time, "notes": "", "tags": [],
+            ], context)
+        }
+    }
+
+    /// Demo mode's `POST /api/event-types/`: a new type with the next id and a slug made from its
+    /// name, as the server makes one.
+    @MainActor
+    static func createDemoEventType(name: String, emoji: String, in context: ModelContext) {
+        let kind = EntityKind.eventType.rawValue
+        let types = (try? context.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let id = (types.compactMap(\.serverID).max() ?? 0) + 1
+        let slug = name.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }.joined(separator: "-")
+        insert(.eventType, id: id, ["id": id, "name": name, "slug": slug.isEmpty ? "type-\(id)" : slug,
+                                    "emoji": emoji], context)
+    }
+
+    /// Demo mode's `PATCH /api/event-types/<slug>/`: the changed name or emoji; the slug stays.
+    @MainActor
+    static func updateDemoEventType(_ type: LocalEntity, with changes: [String: Any], in context: ModelContext) {
+        var p = type.payloadObject
+        for (key, value) in changes { p[key] = value }
+        if let id = type.serverID { insert(.eventType, id: id, p, context) }
+    }
+
+    /// Demo mode's `DELETE /api/event-types/<slug>/`. Like the server, it refuses a type events use,
+    /// saying how many.
+    @MainActor
+    static func deleteDemoEventType(_ type: LocalEntity, in context: ModelContext) throws {
+        let slug = type.payloadObject["slug"] as? String
+        let kind = EntityKind.event.rawValue
+        let events = (try? context.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let count = events.filter { $0.payloadObject["type"] as? String == slug }.count
+        if count > 0 {
+            throw DeleteConflict(message: "This event type is used by events and can not be deleted.",
+                                 eventCount: count)
+        }
+        context.delete(type)
+    }
+
+    /// Demo mode's stand-in for what a sync learns about events from `GET /api/`, the cached event
+    /// types' names and emoji, and what this user may do with event types: everything, unless
+    /// `BB_EVENT_TYPES_READONLY=1`. `BB_NO_EVENTS=1` runs the demo as a server without events.
+    @MainActor
+    private static func refreshDemoEvents(in context: ModelContext) {
+        guard ProcessInfo.processInfo.environment["BB_NO_EVENTS"] != "1" else {
+            EventsCapability.update(rootJSON: Data(#"{"children":"x","notes":"x"}"#.utf8))
+            return
+        }
+        EventsCapability.update(rootJSON: Data(#"{"event-types":"x","events":"x"}"#.utf8))
+        let kind = EntityKind.eventType.rawValue
+        let types = (try? context.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        EventsCapability.store(typesIn: types)
+        let manages = ProcessInfo.processInfo.environment["BB_EVENT_TYPES_READONLY"] != "1"
+        EventsCapability.store(permissions: .init(add: manages, change: manages, delete: manages,
+                                                  deleteWithEvents: manages))
+    }
+
+    // MARK: Milk stash
+
+    /// The milk stash, as a server with it would hold it: two parents linked to the demo child,
+    /// Robin, who produces milk, and Sam, who doesn't; pumping on Robin put into the stash;
+    /// breast-milk bottles taken from it, one with some spilled; donor milk added, and a discard
+    /// with no reason. Timed so FIFO leaves one lot about 80 h old (expired), one about 50 h old
+    /// (warn) and two fresh ones, so every lot state and both expiry alerts can be seen. ids 4000+
+    /// (the parents are 1 and 2).
+    ///
+    /// `BB_MILK_PARENTS=2` adds Casey (parent 3), a second parent who produces milk, with a session
+    /// in the stash, so the parent pickers show and lots are told apart by parent.
+    @MainActor
+    private static func seedStash(into context: ModelContext) {
+        let now = Date()
+        func iso(_ hoursAgo: Double) -> String {
+            APIDate.isoDateTime.string(from: now.addingTimeInterval(-hoursAgo * 3600))
+        }
+
+        insert(.parent, id: 1, [
+            "id": 1, "first_name": "Robin", "last_name": "", "slug": "robin",
+            "picture": NSNull(), "children": [1], "produces_milk": true,
+        ], context)
+        insert(.parent, id: 2, [
+            "id": 2, "first_name": "Sam", "last_name": "", "slug": "sam",
+            "picture": NSNull(), "children": [1], "produces_milk": false,
+        ], context)
+        if ProcessInfo.processInfo.environment["BB_MILK_PARENTS"] == "2" {
+            insert(.parent, id: 3, [
+                "id": 3, "first_name": "Casey", "last_name": "", "slug": "casey",
+                "picture": NSNull(), "children": [1], "produces_milk": true,
+            ], context)
+            insert(.pumping, id: 4003, [
+                "id": 4003, "child": NSNull(), "parent": 3, "start": iso(40.33), "end": iso(40),
+                "amount": 50.0, "stash_amount": 50.0, "notes": "", "tags": [],
+            ], context)
+        }
+
+        // Pumping on Robin: `child` is null, as the server stores it. The second session keeps
+        // 10 ml out of the stash.
+        for (id, hoursAgo, amount, stashed) in [(4000, 80.0, 240.0, 240.0), (4001, 50.0, 130.0, 120.0),
+                                                (4002, 20.0, 100.0, 100.0)] {
+            insert(.pumping, id: id, [
+                "id": id, "child": NSNull(), "parent": 1, "start": iso(hoursAgo + 0.33), "end": iso(hoursAgo),
+                "amount": amount, "stash_amount": stashed, "notes": "", "tags": [],
+            ], context)
+        }
+
+        // Bottles from the stash. The first had 10 ml spilled: the server backs that with a linked
+        // discard at the bottle's start.
+        for (id, hoursAgo, amount, discarded, reason) in [(4010, 70.0, 90.0, 10.0, "Spilled"),
+                                                          (4011, 10.0, 60.0, 0.0, ""),
+                                                          (4012, 6.0, 40.0, 0.0, "")] {
+            var payload: [String: Any] = [
+                "id": id, "child": 1, "parent": NSNull(), "start": iso(hoursAgo), "end": iso(hoursAgo - 0.25),
+                "type": "breast milk", "method": "bottle", "amount": amount, "stash_amount": amount,
+                "stash_discard_reason": reason, "notes": "", "tags": [],
+            ]
+            payload["stash_discarded"] = discarded > 0 ? discarded : NSNull()
+            insert(.feeding, id: id, payload, context)
+        }
+
+        let adjustments: [(id: Int, hoursAgo: Double, kind: StashKind, amount: Double, reason: String,
+                           parent: Int?, feeding: Int?)] = [
+            (4020, 70.0, .discarded, 10, "Spilled", 1, 4010),
+            (4021, 30.0, .added, 60, "Donor milk", nil, nil),
+            (4022, 8.0, .discarded, 5, "", 1, nil),
+        ]
+        for a in adjustments {
+            let parent: Any = a.parent.map { $0 as Any } ?? NSNull()
+            let feeding: Any = a.feeding.map { $0 as Any } ?? NSNull()
+            insert(.stashAdjustment, id: a.id, [
+                "id": a.id, "time": iso(a.hoursAgo), "amount": a.amount, "kind": a.kind.rawValue,
+                "reason": a.reason, "signed_amount": a.kind.sign * a.amount,
+                "parent": parent, "feeding": feeding,
+                "notes": "", "tags": [],
+            ], context)
+        }
+    }
+
+    /// Demo mode's stand-in for a sync's `GET /api/` and `GET /api/stash`. Runs on every demo pull,
+    /// so the cached summary follows what is logged in the demo as it would after a real sync.
+    /// `BB_NO_STASH=1` runs the demo as a server without the milk stash.
+    @MainActor
+    private static func refreshDemoStash(in context: ModelContext) {
+        guard ProcessInfo.processInfo.environment["BB_NO_STASH"] != "1" else {
+            StashCapability.update(rootJSON: Data(#"{"children":"x","pumping":"x"}"#.utf8))
+            return
+        }
+        StashCapability.update(rootJSON: Data(
+            #"{"parents":"x","stash-adjustments":"x","stash":"x","stash/settings":"x"}"#.utf8))
+        StashCapability.store(settings: demoStashSettings)
+        let kinds = [EntityKind.pumping, .feeding, .stashAdjustment].map(\.rawValue)
+        let pendingDelete = SyncState.pendingDelete.rawValue
+        let descriptor = FetchDescriptor<LocalEntity>(predicate: #Predicate { entity in
+            kinds.contains(entity.kindRaw) && entity.syncStateRaw != pendingDelete
+        })
+        let entities = (try? context.fetch(descriptor)) ?? []
+        StashCapability.store(summary: demoStashSummary(entities: entities, now: Date(),
+                                                        settings: demoStashSettings))
+    }
+
+    /// Demo mode's stash settings (`GET /api/stash/settings`), changed in memory by
+    /// ``patchDemoStashSettings(_:)``. Editable, unless `BB_STASH_SETTINGS_READONLY=1` makes this
+    /// user one who may only see them.
+    @MainActor
+    static var demoStashSettings = StashSettingsDTO(
+        pumping_to_stash: true, bottle_from_stash: true, warn_age_hours: 48, max_age_hours: 72,
+        can_edit: ProcessInfo.processInfo.environment["BB_STASH_SETTINGS_READONLY"] != "1")
+
+    /// Demo mode's `PATCH /api/stash/settings`: applies the fields in `body` and returns the result.
+    @MainActor
+    static func patchDemoStashSettings(_ body: [String: Any]) -> StashSettingsDTO {
+        var s = demoStashSettings
+        if let v = body["pumping_to_stash"] as? Bool { s.pumping_to_stash = v }
+        if let v = body["bottle_from_stash"] as? Bool { s.bottle_from_stash = v }
+        if let v = body["warn_age_hours"] as? Int { s.warn_age_hours = v }
+        if let v = body["max_age_hours"] as? Int { s.max_age_hours = v }
+        demoStashSettings = s
+        return s
+    }
+
+    /// The stash summary a server with the milk stash would return for `entities`, for demo mode,
+    /// which has none. Mirrors the server's FIFO:
+    /// - events oldest first, milk in before milk out at the same time: pumping `stash_amount` at
+    ///   its end, a bottle's `stash_amount` at its start, an adjustment's signed amount at its time;
+    /// - a lot is one inflow, and is the parent's of its pumping or "added" entry;
+    /// - every outflow uses the oldest milk first. A discard with a parent takes that parent's
+    ///   oldest milk first, and only then anyone's; bottles have no parent. Milk taken from an empty
+    ///   stash is a shortfall the next inflow repays;
+    /// - lots under 0.01 ml are dropped;
+    /// - a lot is `warn` from 48 h and `expired` from 72 h old. `amount` is rounded to 2 decimals,
+    ///   `throw_away_amount` is not, and `is_oldest_expired` marks only the first expired lot.
+    static func demoStashSummary(entities: [LocalEntity], now: Date,
+                                 settings: StashSettingsDTO? = nil) -> StashSummaryDTO {
+        let warnHours = Double(settings?.warn_age_hours ?? 48), maxHours = Double(settings?.max_age_hours ?? 72)
+        let epsilon = 1e-9
+        func date(_ value: Any?) -> Date? { (value as? String).flatMap(APIDate.parse) }
+
+        var events: [(time: Date, amount: Double, parent: Int?)] = []
+        for entity in entities {
+            let p = entity.payloadObject
+            let parent = p["parent"] as? Int
+            switch entity.kind {
+            case .pumping:
+                if let stashed = p["stash_amount"] as? Double, let end = date(p["end"]) {
+                    events.append((end, stashed, parent))
+                }
+            case .feeding:
+                if let taken = p["stash_amount"] as? Double, let start = date(p["start"]) {
+                    events.append((start, -taken, nil))
+                }
+            case .stashAdjustment:
+                guard let time = date(p["time"]) else { continue }
+                if let signed = p["signed_amount"] as? Double {
+                    events.append((time, signed, parent))
+                } else if let amount = p["amount"] as? Double,
+                          let kind = (p["kind"] as? String).flatMap(StashKind.init(rawValue:)) {
+                    events.append((time, kind.sign * amount, parent))
+                }
+            default:
+                continue
+            }
+        }
+        events.sort { a, b in
+            if a.time != b.time { return a.time < b.time }
+            return a.amount >= 0 && b.amount < 0 // milk in before milk out at the same time
+        }
+
+        var lots: [(time: Date, amount: Double, parent: Int?)] = []
+        /// Takes `need` ml from the oldest lots, only `parent`'s when given; returns what's left.
+        func takeOldest(_ need: Double, parent: Int? = nil) -> Double {
+            var need = need
+            for index in lots.indices where need > epsilon {
+                if let parent, lots[index].parent != parent { continue }
+                let used = min(lots[index].amount, need)
+                lots[index].amount -= used
+                need -= used
+            }
+            lots.removeAll { $0.amount <= epsilon }
+            return need
+        }
+        var shortfall = 0.0
+        for event in events {
+            if event.amount > 0 {
+                let amount = event.amount - shortfall
+                shortfall = max(-amount, 0)
+                if amount > epsilon { lots.append((event.time, amount, event.parent)) }
+                continue
+            }
+            var need = -event.amount
+            if let parent = event.parent { need = takeOldest(need, parent: parent) }
+            need = takeOldest(need)
+            if need > epsilon { shortfall += need }
+        }
+        lots.removeAll { $0.amount < 0.01 }
+
+        var lotDTOs: [StashLotDTO] = []
+        var seenExpired = false
+        for lot in lots {
+            let age = now.timeIntervalSince(lot.time) / 3600
+            let status: StashStatus = age >= maxHours ? .expired : age >= warnHours ? .warn : .ok
+            lotDTOs.append(StashLotDTO(
+                time: lot.time, amount: (lot.amount * 100).rounded() / 100, throw_away_amount: lot.amount,
+                age_hours: (age * 10).rounded() / 10,
+                warn_at: lot.time.addingTimeInterval(warnHours * 3600),
+                expires_at: lot.time.addingTimeInterval(maxHours * 3600),
+                status: status, is_oldest_expired: status == .expired && !seenExpired, parent: lot.parent))
+            if status == .expired { seenExpired = true }
+        }
+        let status: StashStatus = lotDTOs.contains(where: { $0.status == .expired }) ? .expired
+            : lotDTOs.contains(where: { $0.status == .warn }) ? .warn : .ok
+        let balance = events.reduce(0) { $0 + $1.amount }
+        return StashSummaryDTO(
+            balance: (balance * 100).rounded() / 100, status: status,
+            warn_age_hours: warnHours, max_age_hours: maxHours,
+            oldest: lotDTOs.first?.time, oldest_age_hours: lotDTOs.first?.age_hours,
+            lots: lotDTOs, defaults: .init(pumping_to_stash: settings?.pumping_to_stash ?? true,
+                                           bottle_from_stash: settings?.bottle_from_stash ?? true))
     }
 
     /// `BB_SEED_SECOND_CHILD=1`: a second child with no records of her own, so the Editor's Baby

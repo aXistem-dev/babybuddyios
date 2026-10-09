@@ -24,6 +24,10 @@ struct EntityEditorView: View {
     let template: LocalEntity?
     /// Where a new record's `Activity.logged` says it came from.
     let source: Analytics.ActivitySource
+    /// What a new stash entry starts with (its kind, and for a throw-away the amount and reason).
+    let stashPreset: StashEntryPreset?
+    /// The event type (slug) a new event starts on; none, and the customer picks one or more.
+    let eventTypePreset: String?
 
     /// The record kind. Mirrored into state so the top activity selector can swap it while
     /// creating; locked to the passed-in value when editing or converting.
@@ -36,12 +40,15 @@ struct EntityEditorView: View {
     private var children: [LocalEntity]
 
     init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil,
-         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor) {
+         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor,
+         stashPreset: StashEntryPreset? = nil, eventTypePreset: String? = nil) {
         self.childID = childID
         self.entity = entity
         self.sourceTimer = sourceTimer
         self.template = template
         self.source = source
+        self.stashPreset = stashPreset
+        self.eventTypePreset = eventTypePreset
         _kind = State(initialValue: kind)
         _selectedChildID = State(initialValue: childID)
     }
@@ -85,9 +92,33 @@ struct EntityEditorView: View {
     @State private var doseInterval: DoseInterval = .none
     @State private var customDoseHours = ""
     @State private var customDoseMinutes = ""
+    // On a server with the milk stash: who pumped (or breastfed), and how much went into the stash
+    // (pumping) or came out of it (a breast-milk bottle).
+    @State private var parentID: Int?
+    @State private var toStash = true
+    /// Millilitres put into, or taken from, the stash; follows the amount until edited under "More".
+    @State private var storedAmount = ""
+    @State private var showsStashDetails = false
+    // Feeding, on a server with the milk stash: a bottle taken from the stash, and any of it discarded.
+    @State private var fromStash = false
+    @State private var discardsSome = false
+    @State private var discardedAmount = ""
+    @State private var discardReason = ""
+    // Stash entry (a stash adjustment), on a server with the milk stash.
+    @State private var stashKind: StashKind = .added
+    @State private var stashReason = ""
+    /// The bottle a linked discard belongs to, opened from "Edit on the feeding".
+    @State private var linkedFeeding: LocalEntity?
+    // Event, on a server with events: the chosen event types' slugs. Several while creating (one
+    // event each, at the same time); exactly one when editing.
+    @State private var eventTypes: Set<String> = []
 
     /// Every cached dose, so a dose synced in while the editor is open still raises the warning.
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" }) private var medications: [LocalEntity]
+    /// The cached parents, for "Who pumped" and "Breastfed by" on a server with the milk stash.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "parent" }) private var parents: [LocalEntity]
+    /// The cached event types, for an event's type picker on a server with events.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "eventType" }) private var eventTypeRecords: [LocalEntity]
 
     @State private var confirmingDelete = false
     /// The queued write for this record that the server refused, if any. Drives the sync banner.
@@ -96,6 +127,8 @@ struct EntityEditorView: View {
 
     private var isEditing: Bool { entity != nil }
     private var isConverting: Bool { sourceTimer != nil }
+    /// A bottle's linked discard: shown read-only, since it's changed on the bottle.
+    private var isLinkedStashEntry: Bool { kind == .stashAdjustment && entity?.isLinkedStashDiscard == true }
 
     private var navTitle: String {
         if isConverting { return "Convert to \(kind.displayName)" }
@@ -125,7 +158,7 @@ struct EntityEditorView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save).disabled(!isValid).tint(BBColor.brandAccent)
+                    Button("Save", action: save).disabled(!isValid || isLinkedStashEntry).tint(BBColor.brandAccent)
                 }
             }
             // `.alert`, not `confirmationDialog` — iOS 26 anchors the latter to its source as a
@@ -138,6 +171,9 @@ struct EntityEditorView: View {
             .onAppear(perform: loadBlockedMutation)
             .sheet(isPresented: $showingPending) {
                 PendingChangesView(highlight: blockedMutation?.localID)
+            }
+            .sheet(item: $linkedFeeding) { feeding in
+                EntityEditorView(kind: .feeding, childID: feeding.childID ?? childID, entity: feeding)
             }
         }
     }
@@ -200,12 +236,22 @@ struct EntityEditorView: View {
         babySection
         sectioned("When") { whenCard }
         sectioned(detailsTitle) { detailsCard }
-        sectioned("Tags") { tagsCard }
-        if showsNotes { sectioned("Notes") { notesCard } }
-        doseWarning
-        overlapWarning
-        validationNotice
-        actionButtons.padding(.top, 4)
+            // The stash amount tracks the amount until it's changed on its own.
+            .onChange(of: amount) { old, new in
+                if storedAmount == old { storedAmount = new }
+            }
+            // The amount stored or taken sits under "More": open it when that's what blocks Save.
+            .onChange(of: problem) { _, new in
+                if new == .storedAmountInvalid || new == .stashTakenInvalid { showsStashDetails = true }
+            }
+        if !isLinkedStashEntry {
+            sectioned("Tags") { tagsCard }
+            if showsNotes { sectioned("Notes") { notesCard } }
+            doseWarning
+            overlapWarning
+            validationNotice
+            actionButtons.padding(.top, 4)
+        }
     }
 
     // MARK: Layout helpers
@@ -324,11 +370,18 @@ struct EntityEditorView: View {
                     pickerRow("Start", selection: $start, components: [.date, .hourAndMinute])
                     rowDivider
                     endRow
-                case .change, .note, .temperature, .medication:
+                case .change, .note, .temperature, .medication, .event:
                     pickerRow("Time", selection: $time, components: [.date, .hourAndMinute])
                 case .weight, .height, .headCircumference, .bmi:
                     pickerRow("Date", selection: $date, components: .date)
-                case .timer, .child:
+                case .stashAdjustment:
+                    if isLinkedStashEntry {
+                        readOnlyRow("Time", time.formatted(date: .abbreviated, time: .shortened))
+                            .padding(.horizontal, 15).padding(.vertical, 11)
+                    } else {
+                        pickerRow("Time", selection: $time, components: [.date, .hourAndMinute])
+                    }
+                case .timer, .child, .parent, .eventType:
                     EmptyView()
                 }
             }
@@ -378,8 +431,7 @@ struct EntityEditorView: View {
             BBCard(cornerRadius: BBRadius.tile) {
                 TextField("Milestone", text: $milestone, axis: .vertical).lineLimit(1...3)
             }
-        case .pumping:
-            BBCard(cornerRadius: BBRadius.tile) { fieldLabeled("Amount") { amountStepper } }
+        case .pumping: pumpingDetails
         case .note:
             BBCard(cornerRadius: BBRadius.tile) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -402,13 +454,179 @@ struct EntityEditorView: View {
             }
         case .medication:
             medicationDetails
-        case .timer, .child:
+        case .stashAdjustment:
+            stashEntryDetails
+        case .event:
+            eventDetails
+        case .timer, .child, .parent, .eventType:
             EmptyView()
         }
     }
 
+    /// What happened: a row per cached event type. While creating, several can be ticked, and each
+    /// becomes its own event at the same time (a massage and a nail trim together); an edit has one.
+    private var eventDetails: some View {
+        let choices = eventTypeChoices
+        return BBCard(cornerRadius: BBRadius.tile, padding: 0) {
+            VStack(spacing: 0) {
+                if choices.isEmpty {
+                    Text("No event types yet. Add them in Baby Buddy.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 15).padding(.vertical, 13)
+                }
+                ForEach(Array(choices.enumerated()), id: \.element.slug) { index, type in
+                    if index > 0 { rowDivider }
+                    eventTypeRow(type)
+                }
+                // For a user the server lets manage event types: the way there, where it's needed.
+                if EventsCapability.permissions.any {
+                    rowDivider
+                    NavigationLink { EventTypesView() } label: {
+                        HStack {
+                            Label("Manage event types", systemImage: "tag")
+                                .font(.body).foregroundStyle(BBColor.brandAccent)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 15).padding(.vertical, 11)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func eventTypeRow(_ type: EventTypeChoice) -> some View {
+        let selected = eventTypes.contains(type.slug)
+        return Button {
+            if isEditing {
+                eventTypes = [type.slug]
+            } else if selected {
+                eventTypes.remove(type.slug)
+            } else {
+                eventTypes.insert(type.slug)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                if let emoji = type.emoji {
+                    Text(emoji).font(.body).accessibilityHidden(true)
+                }
+                Text(type.name).font(.body).foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(selected ? BBColor.event : Color.secondary.opacity(0.5))
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 15).padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// An event type on offer: its slug (what an event stores), its name and its emoji, if any.
+    struct EventTypeChoice: Equatable {
+        let slug: String
+        let name: String
+        var emoji: String? = nil
+    }
+
+    /// The cached event types by name, and an edited event's own type even if this phone hasn't
+    /// synced it (shown by its slug).
+    private var eventTypeChoices: [EventTypeChoice] {
+        Self.eventTypeChoices(eventTypeRecords, keeping: isEditing ? eventTypes.first : nil)
+    }
+
+    static func eventTypeChoices(_ records: [LocalEntity], keeping current: String?) -> [EventTypeChoice] {
+        var choices = records.compactMap { entity -> EventTypeChoice? in
+            guard entity.kind == .eventType, entity.syncState != .pendingDelete,
+                  let slug = entity.payloadObject["slug"] as? String, !slug.isEmpty else { return nil }
+            let name = entity.payloadObject["name"] as? String ?? ""
+            let emoji = entity.payloadObject["emoji"] as? String ?? ""
+            return EventTypeChoice(slug: slug, name: name.isEmpty ? slug : name, emoji: emoji.isEmpty ? nil : emoji)
+        }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        if let current, !choices.contains(where: { $0.slug == current }) {
+            choices.append(EventTypeChoice(slug: current, name: current))
+        }
+        return choices
+    }
+
+    /// A stash entry: milk added to the stash from elsewhere, or discarded, with an optional reason.
+    /// "Whose milk" only when there are several parents who produce milk to choose from: with one,
+    /// the server fills it in. A bottle's linked discard is shown read-only, with a way to its bottle.
+    @ViewBuilder private var stashEntryDetails: some View {
+        if let entity, entity.isLinkedStashDiscard {
+            linkedStashDetails(entity)
+        } else {
+            BBCard(cornerRadius: BBRadius.tile) {
+                VStack(alignment: .leading, spacing: 16) {
+                    fieldLabeled("Kind") {
+                        BBSegmentedControl(selection: $stashKind, options: StashKind.allCases) { $0.label }
+                    }
+                    fieldLabeled("Amount") { amountStepper }
+                    fieldLabeled("Reason (optional)") {
+                        insetField(TextField("Reason (optional)", text: $stashReason))
+                    }
+                    if parentChoices.count >= 2 {
+                        fieldLabeled("Whose milk") {
+                            parentPicker(parentChoices, none: "None")
+                            if stashKind == .discarded {
+                                Text("A discard takes this parent's oldest milk first. None: the oldest milk of anyone.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func linkedStashDetails(_ entry: LocalEntity) -> some View {
+        let p = entry.payloadObject
+        let amountText = (p["amount"] as? Double).map(EntityFormatting.formatAmount) ?? "\u{2014}"
+        let reason = p["reason"] as? String ?? ""
+        let feeding = entry.stashFeedingID.flatMap { LocalStore.fetch(kind: .feeding, serverID: $0, in: context) }
+        return BBCard(cornerRadius: BBRadius.tile) {
+            VStack(alignment: .leading, spacing: 14) {
+                readOnlyRow("Kind", stashKind.label)
+                readOnlyRow("Amount", amountText)
+                readOnlyRow("Reason", reason.isEmpty ? "None" : reason)
+                Text("This was discarded from a bottle taken from the stash, so it changes with that feeding.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button { linkedFeeding = feeding } label: {
+                    Label("Edit on the feeding", systemImage: "drop.fill")
+                }
+                .buttonStyle(.bbTinted)
+                .disabled(feeding == nil)
+            }
+        }
+    }
+
+    /// A label and a value that can't be changed here.
+    private func readOnlyRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.body)
+            Spacer()
+            Text(value).font(.body).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Upstream's type, method and amount, unless the server has the milk stash: then a breastfeed
+    /// says which parent gave it when the child has several, and a breast-milk bottle whether it was
+    /// taken from the stash and how much of it was discarded.
     private var feedingDetails: some View {
-        BBCard(cornerRadius: BBRadius.tile) {
+        let capable = StashCapability.isSupported
+        let breastfedBy = linkedParentChoices
+        return BBCard(cornerRadius: BBRadius.tile) {
             VStack(alignment: .leading, spacing: 16) {
                 fieldLabeled("Type") {
                     BBSegmentedControl(selection: $feedingType,
@@ -417,8 +635,103 @@ struct EntityEditorView: View {
                 fieldLabeled("Method") {
                     menuField(options: FeedingMethod.allCases, selection: $feedingMethod) { $0.label }
                 }
+                if capable, Self.breastMethods.contains(feedingMethod), breastfedBy.count >= 2 {
+                    fieldLabeled("Breastfed by") { parentPicker(breastfedBy, none: "None") }
+                }
                 fieldLabeled("Amount") { amountStepper }
+                if capable, Self.isStashFeeding(type: feedingType, method: feedingMethod) {
+                    Toggle(isOn: $fromStash) { Text("Taken from stash").font(.body) }
+                        .tint(BBColor.primary)
+                    if fromStash {
+                        stashAmountDetails("Amount from stash")
+                        Toggle(isOn: $discardsSome) { Text("Extra milk discarded").font(.body) }
+                            .tint(BBColor.primary)
+                        if discardsSome {
+                            fieldLabeled("Amount discarded") {
+                                amountField($discardedAmount)
+                                Text("On top of the amount fed.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            fieldLabeled("Reason (optional)") {
+                                insetField(TextField("Reason (optional)", text: $discardReason,
+                                                     prompt: Text("Spilled, left over…")))
+                            }
+                        }
+                    }
+                }
             }
+        }
+    }
+
+    /// Upstream's amount alone, unless the server has the milk stash: then the pumping is logged on
+    /// a parent, with a switch for whether it went into the stash and, under "More", how much of it.
+    private var pumpingDetails: some View {
+        let capable = StashCapability.isSupported
+        return BBCard(cornerRadius: BBRadius.tile) {
+            VStack(alignment: .leading, spacing: 16) {
+                if capable, parentChoices.count >= 2 {
+                    fieldLabeled("Who pumped") { parentPicker(parentChoices, none: nil) }
+                }
+                fieldLabeled("Amount") { amountStepper }
+                if capable {
+                    Toggle(isOn: $toStash) { Text("Store in stash").font(.body) }
+                        .tint(BBColor.primary)
+                    if toStash { stashAmountDetails("Amount stored") }
+                }
+            }
+        }
+    }
+
+    /// "More" under a stash switch: how much of the amount went into, or came out of, the stash.
+    /// Starts at the amount, and follows it until changed on its own.
+    private func stashAmountDetails(_ label: String) -> some View {
+        DisclosureGroup("More", isExpanded: $showsStashDetails) {
+            fieldLabeled(label) { amountField($storedAmount) }
+                .padding(.top, 8)
+                .onAppear { if storedAmount.isEmpty { storedAmount = amount } }
+        }
+        .tint(BBColor.brandAccent)
+    }
+
+    /// Every cached parent, whether they produce milk or not.
+    private var allParents: [MilkParents.Parent] { MilkParents.all(in: parents) }
+
+    /// The parent this entry was saved with, which stays on offer even if they no longer produce milk.
+    private var savedParentID: Int? { entity?.payloadObject["parent"] as? Int }
+
+    /// The parents on offer for "Who pumped" and "Whose milk", by first name: those who produce milk.
+    /// Each picker shows only with two or more to choose from.
+    private var parentChoices: [(id: Int, name: String)] {
+        MilkParents.choices(allParents, keeping: savedParentID).map { (id: $0.id, name: $0.name) }
+    }
+
+    /// The parents on offer for "Breastfed by": those who produce milk and are linked to this child.
+    private var linkedParentChoices: [(id: Int, name: String)] {
+        MilkParents.choices(allParents, keeping: savedParentID)
+            .filter { $0.children.contains(childID) || $0.id == savedParentID }
+            .map { (id: $0.id, name: $0.name) }
+    }
+
+    /// Who pumped: the only parent on offer while the picker is hidden, else the pick.
+    private var pumpingParentID: Int? {
+        let choices = parentChoices
+        return choices.count == 1 ? choices[0].id : parentID
+    }
+
+    /// A segment per parent, or a menu when there are too many to fit. With a `none` label, a first
+    /// option clears the choice; without one, nothing is selected when the child has several
+    /// parents and the entry isn't one of theirs yet.
+    @ViewBuilder private func parentPicker(_ choices: [(id: Int, name: String)], none: String?) -> some View {
+        let options: [Int?] = (none == nil ? [] : [Int?.none]) + choices.map { Optional($0.id) }
+        let name: (Int?) -> String = { id in
+            if id == nil, let none { return none }
+            return choices.first { $0.id == id }?.name ?? "Choose"
+        }
+        if options.count <= 3 {
+            BBSegmentedControl(selection: $parentID, options: options, label: name)
+        } else {
+            menuField(options: options, selection: $parentID, label: name)
         }
     }
 
@@ -560,7 +873,12 @@ struct EntityEditorView: View {
     }
 
     private func plainField(_ placeholder: String, text: Binding<String>) -> some View {
-        TextField(placeholder, text: text)
+        insetField(TextField(placeholder, text: text))
+    }
+
+    /// The inset, hairline-bordered look of the editor's text inputs.
+    private func insetField<Field: View>(_ field: Field) -> some View {
+        field
             .padding(.horizontal, 14).padding(.vertical, 11)
             .background(BBColor.nested, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
             .overlay {
@@ -585,11 +903,13 @@ struct EntityEditorView: View {
         }
     }
 
+    private var amountStepper: some View { amountField($amount) }
+
     /// Amount = grouped large value + "ml", with a neutral "−" and a brand-blue "+".
-    private var amountStepper: some View {
+    private func amountField(_ text: Binding<String>) -> some View {
         HStack(spacing: 10) {
             HStack(spacing: 6) {
-                TextField("0", text: $amount)
+                TextField("0", text: text)
                     .keyboardType(.decimalPad)
                     .font(.title3.weight(.semibold)).monospacedDigit()
                     .fixedSize()
@@ -604,8 +924,8 @@ struct EntityEditorView: View {
                     .strokeBorder(BBColor.fieldStroke, lineWidth: 0.5)
             }
 
-            stepperButton(system: "minus", tint: false) { adjustAmount(-5) }
-            stepperButton(system: "plus", tint: true) { adjustAmount(5) }
+            stepperButton(system: "minus", tint: false) { adjust(text, by: -5) }
+            stepperButton(system: "plus", tint: true) { adjust(text, by: 5) }
         }
     }
 
@@ -620,9 +940,9 @@ struct EntityEditorView: View {
         .buttonStyle(.plain)
     }
 
-    private func adjustAmount(_ delta: Double) {
-        let next = max(0, (ActivityDraft.number(amount) ?? 0) + delta)
-        amount = trimmed(next)
+    private func adjust(_ text: Binding<String>, by delta: Double) {
+        let next = max(0, (ActivityDraft.number(text.wrappedValue) ?? 0) + delta)
+        text.wrappedValue = trimmed(next)
     }
 
     // MARK: Tags & notes cards
@@ -690,9 +1010,16 @@ struct EntityEditorView: View {
     /// The form's current contents, handed to ``ActivityDraft`` so the Baby Buddy rules the client
     /// can check offline live in one testable place instead of a boolean inside the view.
     private var draft: ActivityDraft {
-        ActivityDraft(kind: kind, start: start, end: end, time: time, date: date,
-                      amount: amount, value: value, dosage: dosage,
-                      noteText: noteText, medName: medName)
+        let capable = StashCapability.isSupported
+        return ActivityDraft(kind: kind, start: start, end: end, time: time, date: date,
+                             amount: amount, value: value, dosage: dosage,
+                             noteText: noteText, medName: medName,
+                             parentID: pumpingParentID, requiresParent: capable, hasParents: !parentChoices.isEmpty,
+                             storesInStash: capable && toStash,
+                             takesFromStash: capable && fromStash
+                                 && Self.isStashFeeding(type: feedingType, method: feedingMethod),
+                             stashAmount: storedAmount, discardsSome: discardsSome,
+                             discardedAmount: discardedAmount, eventTypeCount: eventTypes.count)
     }
 
     private var problem: ActivityProblem? { draft.problem }
@@ -818,6 +1145,23 @@ struct EntityEditorView: View {
     // MARK: Load / save
 
     private func populate() {
+        // A new pumping on a server with the milk stash starts on the child's parent, going into
+        // the stash as the server's default says, and a breast-milk bottle taken from it as the
+        // server would take it. An edit loads its own below.
+        parentID = Self.initialParentID(kind: kind, forChild: childID, in: parents)
+        let summary = StashCapability.summary
+        toStash = summary?.defaults.pumping_to_stash ?? true
+        fromStash = Self.bottleFromStashDefault(defaultOn: summary?.defaults.bottle_from_stash ?? false,
+                                                summary: summary, hasStashActivity: cachedStashActivity)
+        if entity == nil, let eventTypePreset { eventTypes = [eventTypePreset] }
+        if entity == nil, let preset = stashPreset {
+            stashKind = preset.kind
+            if let a = preset.amount { amount = trimmed(a) }
+            stashReason = preset.reason
+            // A lot's parent only when they can still be picked: the server refuses a parent who
+            // no longer produces milk, so their lot goes as nobody's, oldest first, which it is.
+            parentID = preset.parent.flatMap { parent in parentChoices.contains { $0.id == parent } ? parent : nil }
+        }
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
             if let s = timer.payloadObject["start"] as? String, let d = APIDate.parse(s) { start = d }
@@ -839,6 +1183,28 @@ struct EntityEditorView: View {
         if let t = p["type"] as? String, let ft = FeedingType(rawValue: t) { feedingType = ft }
         if let m = p["method"] as? String, let fm = FeedingMethod(rawValue: m) { feedingMethod = fm }
         if let a = p["amount"] as? Double { amount = trimmed(a) }
+        if entity != nil, kind == .pumping || kind == .feeding {
+            let stashed = p["stash_amount"] as? Double
+            if let stashed { storedAmount = trimmed(stashed) }
+            if kind == .pumping {
+                if let parent = p["parent"] as? Int { parentID = parent }
+                toStash = stashed != nil
+            } else {
+                parentID = p["parent"] as? Int
+                fromStash = stashed != nil
+                if let discarded = p["stash_discarded"] as? Double, discarded > 0 {
+                    discardsSome = true
+                    discardedAmount = trimmed(discarded)
+                }
+                discardReason = p["stash_discard_reason"] as? String ?? ""
+            }
+        }
+        if kind == .event, let type = p["type"] as? String, !type.isEmpty { eventTypes = [type] }
+        if entity != nil, kind == .stashAdjustment {
+            if let k = (p["kind"] as? String).flatMap(StashKind.init(rawValue:)) { stashKind = k }
+            stashReason = p["reason"] as? String ?? ""
+            parentID = p["parent"] as? Int
+        }
         wet = p["wet"] as? Bool ?? wet
         solid = p["solid"] as? Bool ?? solid
         if let c = p["color"] as? String { color = DiaperColor(rawValue: c) }
@@ -878,6 +1244,12 @@ struct EntityEditorView: View {
         } else if let entity {
             repo.update(entity, payload: payload)
             target = entity
+        } else if kind == .event {
+            // One event per chosen type, all at the same time, so each type's "time since" is right.
+            let payloads = Self.eventPayloads(child: childID, types: eventTypes,
+                                              time: APIDate.isoDateTime.string(from: time),
+                                              notes: notes, tags: tagNames)
+            target = payloads.compactMap { repo.create(kind: .event, payload: $0, source: source) }.last
         } else {
             target = repo.create(kind: kind, payload: payload, source: source)
         }
@@ -926,6 +1298,15 @@ struct EntityEditorView: View {
             p["type"] = feedingType.rawValue; p["method"] = feedingMethod.rawValue
             if let a = ActivityDraft.number(amount) { p["amount"] = a }
             p["notes"] = notes; p["tags"] = tagList
+            let capable = StashCapability.isSupported
+            p.merge(Self.feedingStashFields(type: feedingType, method: feedingMethod, fromStash: fromStash,
+                                            amount: ActivityDraft.number(amount),
+                                            stashAmount: ActivityDraft.number(storedAmount),
+                                            discarded: discardsSome ? ActivityDraft.number(discardedAmount) : nil,
+                                            discardReason: discardReason, capable: capable)) { $1 }
+            p.merge(Self.feedingParentField(method: feedingMethod, parentID: breastfeedingParentID,
+                                            linkedParentCount: linkedParentChoices.count,
+                                            isNew: entity == nil, capable: capable)) { $1 }
         case .change:
             p["time"] = iso(time); p["wet"] = wet; p["solid"] = solid
             if let color { p["color"] = color.rawValue }
@@ -940,6 +1321,9 @@ struct EntityEditorView: View {
             p["start"] = iso(start); p["end"] = iso(end)
             if let a = ActivityDraft.number(amount) { p["amount"] = a }
             p["notes"] = notes; p["tags"] = tagList
+            p = Self.pumpingPayload(base: p, parentID: pumpingParentID, toStash: toStash,
+                                    storedAmount: ActivityDraft.number(storedAmount),
+                                    amount: ActivityDraft.number(amount), capable: StashCapability.isSupported)
         case .note:
             p["time"] = iso(time); p["note"] = noteText; p["tags"] = tagList
         case .weight, .height, .headCircumference, .bmi:
@@ -957,12 +1341,179 @@ struct EntityEditorView: View {
             p["dosage_unit"] = dosageUnit
             p["next_dose_interval"] = doseIntervalSeconds.map(APIDuration.string(from:)) ?? NSNull()
             p["notes"] = notes; p["tags"] = tagList
-        case .timer, .child:
+        case .event:
+            p = Self.eventPayloads(child: childID, types: Set(eventTypes.prefix(1)), time: iso(time),
+                                   notes: notes, tags: tagList).first ?? p
+        case .stashAdjustment:
+            p = Self.stashEntryPayload(kind: stashKind, amount: ActivityDraft.number(amount), time: iso(time),
+                                       reason: stashReason, parentID: parentID,
+                                       parentCount: parentChoices.count, isNew: entity == nil,
+                                       pinsParent: stashPreset?.pinsParent ?? false,
+                                       notes: notes, tags: tagList)
+        case .timer, .child, .parent, .eventType:
             break
         }
         // Preserve the server id when editing so the payload round-trips.
         if let id = entity?.serverID { p["id"] = id }
         return p
+    }
+
+    /// A pumping's payload. On a server with the milk stash (`capable`) it's logged on a parent:
+    /// `parent`, and no `child` (the server keeps pumping on a parent at `child: null`), with
+    /// `stash_amount` the stored amount, else the whole amount, or null when it was kept out of the
+    /// stash or there's no amount above zero to store (the server refuses a stash amount of 0).
+    /// Otherwise `base` unchanged: upstream's payload, on the child, with no stash keys.
+    /// Creating, editing and converting a timer all go through this.
+    static func pumpingPayload(base: [String: Any], parentID: Int?, toStash: Bool, storedAmount: Double?,
+                               amount: Double?, capable: Bool) -> [String: Any] {
+        guard capable else { return base }
+        var p = base
+        p.removeValue(forKey: "child")
+        if let parentID { p["parent"] = parentID }
+        let stashed = toStash && (amount ?? 0) > 0 ? (storedAmount ?? amount) : nil
+        p["stash_amount"] = stashed.map { $0 as Any } ?? NSNull()
+        return p
+    }
+
+    /// The parent a new pumping or breastfeed starts on, as the server would pick it: the only
+    /// parent who produces milk linked to `child`, else the only parent who produces milk at all.
+    /// Otherwise nil, so the picker starts empty and Save waits for a choice.
+    static func defaultParentID(forChild child: Int, in entities: [LocalEntity]) -> Int? {
+        let milk = MilkParents.all(in: entities).filter(\.producesMilk)
+        let linked = milk.filter { $0.children.contains(child) }
+        if linked.count == 1 { return linked[0].id }
+        return milk.count == 1 ? milk[0].id : nil
+    }
+
+    /// The parent a new entry starts on: ``defaultParentID(forChild:in:)``, except that a new stash
+    /// entry starts on none, as on the web. Its picker only shows with several parents, where one has
+    /// to be picked; with one, the server fills it in.
+    static func initialParentID(kind: EntityKind, forChild child: Int, in entities: [LocalEntity]) -> Int? {
+        kind == .stashAdjustment ? nil : defaultParentID(forChild: child, in: entities)
+    }
+
+    /// Whether a new breast-milk bottle starts "Taken from stash". The server applies its default
+    /// (`defaultOn`) only once the stash has been used: a pumping put into it, or a stash entry. The
+    /// app asks the same of what it has: a cached summary holding milk (or below zero), or
+    /// `hasStashActivity`, a cached stash entry or stored pumping, looked up only when needed.
+    static func bottleFromStashDefault(defaultOn: Bool, summary: StashSummaryDTO?,
+                                       hasStashActivity: @autoclosure () -> Bool) -> Bool {
+        guard defaultOn else { return false }
+        if let summary, !summary.lots.isEmpty || summary.balance != 0 { return true }
+        return hasStashActivity()
+    }
+
+    /// Whether the cache shows the stash in use: any stash entry, or a pumping put into the stash.
+    private var cachedStashActivity: Bool {
+        let adjustment = EntityKind.stashAdjustment.rawValue, pumping = EntityKind.pumping.rawValue
+        var entries = FetchDescriptor<LocalEntity>(predicate: #Predicate { entity in
+            entity.kindRaw == adjustment
+        })
+        entries.fetchLimit = 1
+        if let found = try? context.fetch(entries), !found.isEmpty { return true }
+        let pumpings = (try? context.fetch(FetchDescriptor<LocalEntity>(predicate: #Predicate { entity in
+            entity.kindRaw == pumping
+        }))) ?? []
+        return pumpings.contains { ($0.payloadObject["stash_amount"] as? Double) != nil }
+    }
+
+    /// The methods that are a breastfeed, the only ones the server keeps a feeding's `parent` on.
+    private static let breastMethods: Set<FeedingMethod> = [.leftBreast, .rightBreast, .bothBreasts]
+
+    /// The methods that give expressed milk, the only ones that can come from the milk stash.
+    private static let stashMethods: Set<FeedingMethod> = [.bottle, .parentFed, .selfFed]
+
+    /// A feeding that can come from the milk stash: breast milk, fortified or not, given by bottle,
+    /// by a parent or self-fed (never a breastfeed).
+    private static func isStashFeeding(type: FeedingType, method: FeedingMethod) -> Bool {
+        (type == .breastMilk || type == .fortifiedBreastMilk) && stashMethods.contains(method)
+    }
+
+    /// A feeding's milk stash fields. Nothing without the milk stash (`capable`). A breast-milk bottle
+    /// taken from the stash sends `stash_amount` (the amount from the stash, else the whole amount)
+    /// and, when some was discarded, `stash_discarded` with its reason, trimmed and cut to the
+    /// server's 255 characters. Anything else sends the three cleared, so an edit that stops a bottle
+    /// coming from the stash (or discarding some) removes it on the server. The discard and its
+    /// reason always go together, and a discard never goes without a `stash_amount`: the server
+    /// refuses either.
+    static func feedingStashFields(type: FeedingType, method: FeedingMethod, fromStash: Bool, amount: Double?,
+                                   stashAmount: Double?, discarded: Double?, discardReason: String?,
+                                   capable: Bool) -> [String: Any] {
+        guard capable else { return [:] }
+        let taken: Double? = fromStash && isStashFeeding(type: type, method: method) ? (stashAmount ?? amount) : nil
+        guard let taken else {
+            return ["stash_amount": NSNull(), "stash_discarded": NSNull(), "stash_discard_reason": ""]
+        }
+        guard let discarded, discarded > 0 else {
+            return ["stash_amount": taken, "stash_discarded": NSNull(), "stash_discard_reason": ""]
+        }
+        return ["stash_amount": taken, "stash_discarded": discarded,
+                "stash_discard_reason": cappedReason(discardReason ?? "")]
+    }
+
+    /// A stash reason as the server takes it: trimmed, and at most 255 characters, counted as code
+    /// points the way the server counts them.
+    static func cappedReason(_ reason: String) -> String {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(String.UnicodeScalarView(trimmed.unicodeScalars.prefix(255)))
+    }
+
+    /// The events a save creates: one per chosen event type (by slug), all for `child` at the
+    /// identical `time`, with the same notes and tags. Sorted by slug so the order is stable.
+    static func eventPayloads(child: Int, types: Set<String>, time: String, notes: String,
+                              tags: [String]) -> [[String: Any]] {
+        types.sorted().map { slug in
+            ["child": child, "type": slug, "time": time, "notes": notes, "tags": tags]
+        }
+    }
+
+    /// A stash entry's payload: kind, amount, time, reason, notes and tags, and never a `child` (the
+    /// stash belongs to the parents) nor the server's computed `signed_amount` or bottle link.
+    /// `parent` only when there are several parents who produce milk (`parentCount`) to tell apart:
+    /// the pick, else nothing on a new entry and a cleared parent on an edit. With one or none the
+    /// key is left out, so the server fills in the only parent who produces milk on a new entry and
+    /// keeps an edit's own. A new entry that pins its parent (throwing milk away, see
+    /// ``StashEntryPreset``) always sends it, or null for none.
+    static func stashEntryPayload(kind: StashKind, amount: Double?, time: String, reason: String,
+                                  parentID: Int?, parentCount: Int, isNew: Bool, pinsParent: Bool = false,
+                                  notes: String, tags: [String]) -> [String: Any] {
+        var p: [String: Any] = ["time": time, "kind": kind.rawValue, "reason": cappedReason(reason),
+                                "notes": notes, "tags": tags]
+        if let amount { p["amount"] = amount }
+        if parentCount >= 2 {
+            if let parentID {
+                p["parent"] = parentID
+            } else if !isNew || pinsParent {
+                p["parent"] = NSNull()
+            }
+        } else if isNew, pinsParent {
+            p["parent"] = parentID.map { $0 as Any } ?? NSNull()
+        }
+        return p
+    }
+
+    /// Who breastfed, on a server with the milk stash (`capable`), for a breastfeed only: the server
+    /// drops a parent on other methods. The chosen parent, else nothing on a new feeding (the server
+    /// fills in the child's only parent), else a cleared parent when the child has several to
+    /// choose from.
+    static func feedingParentField(method: FeedingMethod, parentID: Int?, linkedParentCount: Int, isNew: Bool,
+                                   capable: Bool) -> [String: Any] {
+        guard capable, breastMethods.contains(method) else { return [:] }
+        if let parentID { return ["parent": parentID] }
+        if !isNew, linkedParentCount >= 2 { return ["parent": NSNull()] }
+        return [:]
+    }
+
+    /// Who breastfed. An edit keeps the picker's value. A new feeding takes, while the picker is
+    /// hidden, the child's only parent who produces milk, else the only one there is, and otherwise
+    /// the pick when it's one of the child's parents, never one chosen for a pumping before
+    /// switching kinds.
+    private var breastfeedingParentID: Int? {
+        if isEditing { return parentID }
+        let linked = linkedParentChoices.map { $0.id }
+        if linked.count < 2 { return linked.first ?? MilkParents.single(allParents)?.id }
+        guard let parentID, linked.contains(parentID) else { return nil }
+        return parentID
     }
 
     /// The chosen next-dose interval in seconds; a blank or zero custom entry means none.
