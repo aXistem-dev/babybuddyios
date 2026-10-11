@@ -254,6 +254,13 @@ enum StashAgePolicy {
                               now: Date) -> [ForgottenTimerPolicy.Request] {
         add.filter { $0.fireDate > now || !scheduled.contains($0.id) }
     }
+
+    /// What ``scheduledKey`` holds after a reconcile: the ids the notification center took this
+    /// time, and those from before that a lot still wants, so the list never outgrows the stash. An
+    /// add that failed isn't recorded, so its alert is tried again, even once it's overdue.
+    static func recordScheduled(previous: Set<String>, wanted: Set<String>, added: [String]) -> [String] {
+        previous.intersection(wanted).union(added).sorted()
+    }
 }
 
 /// While a child is in sick mode and their newest reading is over the fever line, one reminder to
@@ -307,9 +314,14 @@ final class LocalAlerts {
                 return (request.identifier, date)
             })
         let delivered = Set(await center.deliveredNotifications().map(\.request.identifier))
+        // Stash alerts are remembered once scheduled (``StashAgePolicy/firstTimeOnly``), so none is
+        // worked out without permission: one added then never shows, yet would count as scheduled.
+        // A second reconcile racing the first one's prompt lands here still undetermined.
+        let status = await center.notificationSettings().authorizationStatus
+        let stashAllowed = stashOn && [.authorized, .provisional, .ephemeral].contains(status)
         // Read after the awaits above: a permission prompt can wait on the user.
         let now = Date()
-        let stash = stashOn ? StashAgePolicy.requests(from: StashCapability.summary, now: now) : []
+        let stash = stashAllowed ? StashAgePolicy.requests(from: StashCapability.summary, now: now) : []
 
         // A dose reminder or temperature check that is already overdue when first seen (an old
         // dose, or the app opened long after) says nothing useful, so only timers fire late — and
@@ -319,6 +331,8 @@ final class LocalAlerts {
                                                  ("medication-", dosesOn ? wanted.doses : [], false),
                                                  ("temperature-", wanted.checks, false),
                                                  ("stash-", stash, true)] {
+            // Without permission the stash's alerts and its record stay as they are.
+            if prefix == "stash-" && !stashAllowed { continue }
             let plan = ForgottenTimerPolicy.plan(wanted: requests, pending: pending, delivered: delivered,
                                                  now: now, prefix: prefix, firesOverdue: firesOverdue)
             center.removePendingNotificationRequests(withIdentifiers: plan.remove)
@@ -331,10 +345,8 @@ final class LocalAlerts {
             var add = plan.add
             if prefix == "stash-" {
                 add = StashAgePolicy.firstTimeOnly(add, scheduled: stashScheduled, now: now)
-                // Remembered while the lot still wants it, so the list never outgrows the stash.
-                let scheduled = stashScheduled.intersection(wantedIDs).union(add.map(\.id))
-                SharedDefaults.suite.set(scheduled.sorted(), forKey: StashAgePolicy.scheduledKey)
             }
+            var added: [String] = []
             for request in add {
                 let content = UNMutableNotificationContent()
                 content.title = request.title
@@ -345,7 +357,18 @@ final class LocalAlerts {
                 let fire = max(request.fireDate, Date().addingTimeInterval(1))
                 let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fire)
                 let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-                try? await center.add(UNNotificationRequest(identifier: request.id, content: content, trigger: trigger))
+                do {
+                    try await center.add(UNNotificationRequest(identifier: request.id, content: content, trigger: trigger))
+                    added.append(request.id)
+                } catch {}
+            }
+            if prefix == "stash-" {
+                // What the center already held counts too: a reconcile racing another one finds the
+                // other's alerts pending, adds nothing, and would otherwise drop them from the record.
+                let held = wantedIDs.filter { pending[$0] != nil || delivered.contains($0) }
+                SharedDefaults.suite.set(StashAgePolicy.recordScheduled(previous: stashScheduled, wanted: wantedIDs,
+                                                                        added: added + held),
+                                         forKey: StashAgePolicy.scheduledKey)
             }
         }
     }

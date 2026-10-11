@@ -174,9 +174,9 @@ class UITestCase: XCTestCase {
 
     /// Answers the notification permission prompt, when the app raises one: turning an alert on
     /// does, and so does sick mode with a fever, when its first temperature check is due.
-    func allowNotificationsIfAsked() {
+    func allowNotificationsIfAsked(timeout: TimeInterval = 5) {
         let allow = springboard.buttons["Allow"]
-        if allow.waitForExistence(timeout: 5) { allow.tap() }
+        if allow.waitForExistence(timeout: timeout) { allow.tap() }
     }
 
     /// Sends the app to the background, the way someone leaving the app does.

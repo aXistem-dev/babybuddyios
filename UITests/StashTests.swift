@@ -224,7 +224,9 @@ final class StashTests: UITestCase {
     /// "Throw away" is the next step.
     func testMilkAgeAlertOpensStash() {
         launch(["BB_STASH_ALERT_SECONDS": "25"])
-        allowNotificationsIfAsked() // the hook turns the alerts on, so the reset install asks
+        // The hook turns the alerts on, so the reset install asks; on a freshly erased simulator the
+        // prompt can take longer than the usual 5 s to come up.
+        allowNotificationsIfAsked(timeout: 30)
         expect(app.buttons.labeled("Milk stash"))
 
         pressHome()

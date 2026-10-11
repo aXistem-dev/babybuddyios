@@ -100,6 +100,30 @@ final class StashAgeAlertTests: XCTestCase {
         XCTAssertEqual(again.count, 2)
     }
 
+    /// An add the notification center refused (no permission yet) isn't recorded as scheduled.
+    func testFailedAddNotRecorded() {
+        let warn = "stash-warn-\(epoch)", expire = "stash-expire-\(epoch)"
+        let recorded = StashAgePolicy.recordScheduled(previous: [], wanted: [warn, expire], added: [expire])
+        XCTAssertEqual(recorded, [expire])
+    }
+
+    /// Ids no lot wants any more drop out of the record.
+    func testRecordPrunesUnwanted() {
+        let gone = "stash-expire-1", kept = "stash-expire-\(epoch)"
+        let recorded = StashAgePolicy.recordScheduled(previous: [gone, kept], wanted: [kept], added: [])
+        XCTAssertEqual(recorded, [kept])
+    }
+
+    /// An alert whose add failed is still overdue-eligible later: unrecorded, it fires once permission
+    /// comes, rather than being taken for one already scheduled.
+    func testUnrecordedOverdueAlertFiresLater() {
+        let now = t0.addingTimeInterval(80 * 3600)
+        let wanted = StashAgePolicy.requests(from: summary(lots: [lot(t0, 90)]), now: now)
+        let recorded = StashAgePolicy.recordScheduled(previous: [], wanted: Set(wanted.map(\.id)), added: [])
+        XCTAssertEqual(StashAgePolicy.firstTimeOnly(wanted, scheduled: Set(recorded), now: now).map(\.id),
+                       wanted.map(\.id))
+    }
+
     func testDisabledOrNoSummaryIsEmpty() {
         XCTAssertTrue(StashAgePolicy.requests(from: nil, now: t0).isEmpty)
     }
