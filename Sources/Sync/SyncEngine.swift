@@ -526,8 +526,9 @@ final class SyncEngine {
             DemoData.seedIfNeeded(into: context)
             // The seed refreshes the cached stash summary on every demo pull, but a demo pull
             // reports no change, so `sync()` wouldn't reconcile after it: the milk stash expiry alerts
-            // catch up here.
-            await LocalAlerts.shared.reconcile()
+            // catch up here. Not awaited: the reconcile can wait on a permission prompt, and on a
+            // freshly booted simulator the notification center can take seconds to answer at all.
+            Task { await LocalAlerts.shared.reconcile() }
             lastSyncDate = .now
             status = .idle
             return false
