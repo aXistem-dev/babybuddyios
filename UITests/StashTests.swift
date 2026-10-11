@@ -220,10 +220,15 @@ final class StashTests: UITestCase {
     }
 
     /// The demo stash holds a lot past its use-first age. `BB_STASH_ALERT_SECONDS` brings its
-    /// "Milk expiring soon" to 25 s after launch; tapping it opens the stash screen, where
+    /// "Milk expiring soon" to 60 s after launch; tapping it opens the stash screen, where
     /// "Throw away" is the next step.
+    ///
+    /// Why 60 s, and 90 s for the banner: a suite run starts with permission already granted, so no
+    /// prompt comes and the wait for one runs its full 30 s with the app in front. An "expiring soon"
+    /// due in that time shows as a foreground banner, the interruption monitor swipes it away, and
+    /// the banner wait after Home only ever sees "Milk has expired".
     func testMilkAgeAlertOpensStash() {
-        launch(["BB_STASH_ALERT_SECONDS": "25"])
+        launch(["BB_STASH_ALERT_SECONDS": "60"])
         // The hook turns the alerts on, so the reset install asks; on a freshly erased simulator the
         // prompt can take longer than the usual 5 s to come up.
         allowNotificationsIfAsked(timeout: 30)
@@ -232,7 +237,7 @@ final class StashTests: UITestCase {
         pressHome()
         let banner = springboard.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", "Milk expiring soon")).firstMatch
-        if !banner.waitForExistence(timeout: 60) {
+        if !banner.waitForExistence(timeout: 90) {
             // It may have come and gone while the app was away; Notification Center keeps it.
             openNotificationCenter()
             XCTAssertTrue(banner.waitForExistence(timeout: 10), "No “Milk expiring soon” notification")
