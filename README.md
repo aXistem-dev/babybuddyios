@@ -67,6 +67,19 @@ multiple children run through all of it.
 | 🔒 **Locked down** | Credentials stay in your Keychain, with an optional Face ID or Touch ID lock. |
 | 🎨 **Six app icons** | Swap the Home Screen icon under **Settings → Appearance → App Icon**. |
 
+## Milk stash
+
+On a Baby Buddy server with the milk stash, the app adds:
+
+- **Into and from the stash.** A pumping session can go into the stash, and a breast-milk feed that
+  isn't at the breast can come from it.
+- **A Milk stash screen.** The balance and the stored milk, oldest first, with when it expires. Add
+  or discard milk, or throw away the expired milk in one go.
+- **Expiry alerts.** A notification when milk expires soon and when it has expired (Settings,
+  "Milk stash expiry").
+
+On a server without it nothing changes: no stash screen appears and no stash fields are sent.
+
 ## Your baby's records stay with you
 
 Baby tracking data syncs only between the app and your
