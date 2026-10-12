@@ -129,4 +129,24 @@ final class StashTests: UITestCase {
         tap(app.buttons.labeled("Milk stash"))
         expect(app.navigationBars["Milk stash"])
     }
+
+    /// Settings offers the milk stash's expiry alerts only on a server with the stash. (UI tests
+    /// start with them off; delivering an alert is covered by the unit tests.)
+    func testMilkStashExpirySetting() {
+        launch(["BB_START_TAB": "settings"])
+        let expiry = app.switches["Milk stash expiry"]
+        expectValue(expiry, "0")
+
+        launch(["BB_START_TAB": "settings", "BB_NO_STASH": "1"])
+        expect(app.switches["Medication reminders"])
+        XCTAssertFalse(app.switches["Milk stash expiry"].exists)
+    }
+
+    /// A milk stash alert's link opens the stash screen.
+    func testStashLinkOpensTheScreen() {
+        launch()
+        expect(element(labeled: "Diapers, "))
+        app.open(URL(string: "babybuddy://stash")!)
+        expect(app.navigationBars["Milk stash"])
+    }
 }

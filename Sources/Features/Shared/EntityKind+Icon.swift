@@ -6,8 +6,11 @@ extension EntityKind {
     /// Asset-catalog name of the custom glyph, e.g. `glyph_feeding`.
     var assetName: String { "glyph_\(rawValue)" }
 
-    /// The category's icon as a tintable SwiftUI `Image`.
-    var iconImage: Image { Image(assetName).renderingMode(.template) }
+    /// The category's icon as a tintable SwiftUI `Image`. Milk stash entries have no glyph in the
+    /// web app's icon font, so they use their SF Symbol.
+    var iconImage: Image {
+        (self == .stashAdjustment ? Image(systemName: systemImage) : Image(assetName)).renderingMode(.template)
+    }
 
     /// Size-constrained icon view. Required because the custom glyphs have large intrinsic
     /// sizes and (unlike SF Symbols) don't scale to the surrounding font automatically.
