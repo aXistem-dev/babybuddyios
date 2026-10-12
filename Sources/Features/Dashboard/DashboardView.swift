@@ -15,6 +15,8 @@ struct DashboardView: View {
     @Binding var selectedChildID: Int
     @AppStorage(SharedDefaults.stalenessThresholdKey, store: SharedDefaults.suite)
     private var stalenessThresholdMinutes = SyncFreshness.defaultThresholdMinutes
+    // The next-feed estimate's switch, watched so Home follows Settings.
+    @AppStorage(FeedEstimate.Settings.enabledKey, store: SharedDefaults.suite) private var showsFeedEstimate = false
 
     /// The records the Dashboard actually reads, filtered store-side: the selected child's
     /// events, every child record (for the header/switcher), and every timer (deep links can
@@ -560,7 +562,37 @@ struct DashboardView: View {
                     MetricTile(kind: .tummyTime, label: "Tummy time", value: tummyTodayText)
                 }
             }
+            if let estimate = feedEstimate {
+                // Redrawn at the estimated time, so the line leaves once that time has passed.
+                SwiftUI.TimelineView(.explicit([estimate.next.addingTimeInterval(1)])) { _ in
+                    if Date.now <= estimate.next { feedEstimateLine(estimate) }
+                }
+            }
         }
+    }
+
+    /// When this child will likely feed next, while it's switched on and their feeds allow it.
+    private var feedEstimate: FeedEstimate? {
+        guard showsFeedEstimate else { return nil }
+        return FeedEstimate.compute(from: childEntities, childID: selectedChildID, now: .now)
+    }
+
+    /// A quiet line under the Today tiles: "Usually every ~2h 45m · next around 3:15 AM".
+    private func feedEstimateLine(_ estimate: FeedEstimate) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(BBColor.activity(.feeding))
+            Text(estimate.line)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Next feed estimate: \(estimate.line)")
     }
 
     /// Wrap a "Today" tile so tapping it pushes a single-day, single-kind timeline slice.
