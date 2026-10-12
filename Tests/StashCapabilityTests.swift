@@ -89,6 +89,19 @@ final class StashCapabilityTests: XCTestCase {
         XCTAssertEqual(draft.problem, .futureTimestamp)
     }
 
+    /// As the server checks it: breast milk or fortified breast milk, not at the breast, with an amount.
+    func testWhichFeedsCanComeFromTheStash() {
+        XCTAssertTrue(StashCapability.canComeFromStash(type: .breastMilk, method: .bottle, amount: 60))
+        XCTAssertTrue(StashCapability.canComeFromStash(type: .fortifiedBreastMilk, method: .parentFed, amount: 60))
+        XCTAssertTrue(StashCapability.canComeFromStash(type: .breastMilk, method: .selfFed, amount: 0.5))
+        XCTAssertFalse(StashCapability.canComeFromStash(type: .formula, method: .bottle, amount: 60))
+        XCTAssertFalse(StashCapability.canComeFromStash(type: .solidFood, method: .selfFed, amount: 60))
+        XCTAssertFalse(StashCapability.canComeFromStash(type: .breastMilk, method: .leftBreast, amount: 60))
+        XCTAssertFalse(StashCapability.canComeFromStash(type: .breastMilk, method: .bothBreasts, amount: 60))
+        XCTAssertFalse(StashCapability.canComeFromStash(type: .breastMilk, method: .bottle, amount: nil))
+        XCTAssertFalse(StashCapability.canComeFromStash(type: .breastMilk, method: .bottle, amount: 0))
+    }
+
     func testStashEntriesStayOutOfTheTimeline() {
         XCTAssertFalse(EntityKind.timelineKinds.contains(.stashAdjustment))
     }
