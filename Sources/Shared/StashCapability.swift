@@ -6,6 +6,19 @@ enum StashCapability {
     private static let supportedKey = "stashSupported"
     private static let summaryKey = "stashSummary"
 
+    /// The phone's last choice of "Into the milk stash" on pumping and "From the milk stash" on a
+    /// bottle, which the next one starts with (`UserDefaults.standard`).
+    static let pumpingToStashKey = "pumpingToStash"
+    static let bottleFromStashKey = "bottleFromStash"
+
+    /// Whether a feed can come from the milk stash, as the server checks it: breast milk or
+    /// fortified breast milk, not fed at the breast, with an amount.
+    static func canComeFromStash(type: FeedingType, method: FeedingMethod, amount: Double?) -> Bool {
+        [.breastMilk, .fortifiedBreastMilk].contains(type)
+            && ![.leftBreast, .rightBreast, .bothBreasts].contains(method)
+            && (amount ?? 0) > 0
+    }
+
     /// The API root keys a server with the milk stash lists.
     static let rootKeys = ["stash-adjustments", "stash"]
 
