@@ -13,6 +13,9 @@ struct ChildStatus: Equatable {
     let change: KindStatus
     /// The child's currently-running timer, if any — drives the "timer running" header.
     let runningTimer: RunningTimer?
+    /// When the child will likely feed next, while the estimate is switched on in Settings and the
+    /// recent feeds allow one (see ``FeedEstimate``).
+    var nextFeed: FeedEstimate? = nil
 
     /// The kinds surfaced by the status widget, in display order.
     static let kinds: [EntityKind] = [.feeding, .sleep, .change]
@@ -61,7 +64,9 @@ struct ChildStatus: Equatable {
             feeding: status(for: .feeding),
             sleep: status(for: .sleep),
             change: status(for: .change),
-            runningTimer: running)
+            runningTimer: running,
+            nextFeed: FeedEstimate.Settings.isEnabled
+                ? FeedEstimate.compute(from: entities, childID: childID, now: now) : nil)
     }
 
     /// Compact "age" of a date relative to `now` for the widget tiles ("now", "20m", "2h",
