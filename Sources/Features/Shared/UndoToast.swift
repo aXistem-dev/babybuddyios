@@ -42,7 +42,7 @@ final class UndoToastCenter {
 
     func show(_ entity: LocalEntity) {
         present(Item(localID: entity.localID, kind: entity.kind,
-                     title: "Logged \(entity.kind.displayName.lowercased())",
+                     title: "Logged \(EntityFormatting.title(entity).lowercased())",
                      subtitle: EntityFormatting.subtitle(entity), revert: nil))
     }
 
@@ -123,7 +123,8 @@ struct UndoToastView: View {
             .padding(.horizontal, 16)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .accessibilityElement(children: .contain)
-            .accessibilityLabel(item.kind.map { "Logged \($0.displayName)" } ?? item.title)
+            // An event reads as its type ("Logged bath"), which the title already says.
+            .accessibilityLabel(item.kind.map { $0 == .event ? item.title : "Logged \($0.displayName)" } ?? item.title)
             .accessibilityAction(named: "Undo") { center.undo(in: context) }
         }
     }
