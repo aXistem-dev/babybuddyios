@@ -24,6 +24,8 @@ struct EntityEditorView: View {
     let template: LocalEntity?
     /// Where a new record's `Activity.logged` says it came from.
     let source: Analytics.ActivitySource
+    /// The event type (slug) a new event starts on; none, and the customer picks one or more.
+    let eventTypePreset: String?
 
     /// The record kind. Mirrored into state so the top activity selector can swap it while
     /// creating; locked to the passed-in value when editing or converting.
@@ -36,12 +38,14 @@ struct EntityEditorView: View {
     private var children: [LocalEntity]
 
     init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil,
-         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor) {
+         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor,
+         eventTypePreset: String? = nil) {
         self.childID = childID
         self.entity = entity
         self.sourceTimer = sourceTimer
         self.template = template
         self.source = source
+        self.eventTypePreset = eventTypePreset
         _kind = State(initialValue: kind)
         _selectedChildID = State(initialValue: childID)
     }
@@ -85,9 +89,14 @@ struct EntityEditorView: View {
     @State private var doseInterval: DoseInterval = .none
     @State private var customDoseHours = ""
     @State private var customDoseMinutes = ""
+    // Event, on a server with events: the chosen event types' slugs. Several while creating (one
+    // event each, at the same time); exactly one when editing.
+    @State private var eventTypes: Set<String> = []
 
     /// Every cached dose, so a dose synced in while the editor is open still raises the warning.
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" }) private var medications: [LocalEntity]
+    /// The cached event types, for an event's type picker on a server with events.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "eventType" }) private var eventTypeRecords: [LocalEntity]
 
     @State private var confirmingDelete = false
     /// The queued write for this record that the server refused, if any. Drives the sync banner.
@@ -324,11 +333,11 @@ struct EntityEditorView: View {
                     pickerRow("Start", selection: $start, components: [.date, .hourAndMinute])
                     rowDivider
                     endRow
-                case .change, .note, .temperature, .medication:
+                case .change, .note, .temperature, .medication, .event:
                     pickerRow("Time", selection: $time, components: [.date, .hourAndMinute])
                 case .weight, .height, .headCircumference, .bmi:
                     pickerRow("Date", selection: $date, components: .date)
-                case .timer, .child:
+                case .timer, .child, .eventType:
                     EmptyView()
                 }
             }
@@ -402,9 +411,83 @@ struct EntityEditorView: View {
             }
         case .medication:
             medicationDetails
-        case .timer, .child:
+        case .event:
+            eventDetails
+        case .timer, .child, .eventType:
             EmptyView()
         }
+    }
+
+    /// What happened: a row per cached event type. While creating, several can be ticked, and each
+    /// becomes its own event at the same time (a bath and a nail trim together); an edit has one.
+    private var eventDetails: some View {
+        let choices = eventTypeChoices
+        return BBCard(cornerRadius: BBRadius.tile, padding: 0) {
+            VStack(spacing: 0) {
+                if choices.isEmpty {
+                    Text("No event types yet. Add them in Baby Buddy.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 15).padding(.vertical, 13)
+                }
+                ForEach(Array(choices.enumerated()), id: \.element.slug) { index, type in
+                    if index > 0 { rowDivider }
+                    eventTypeRow(type)
+                }
+            }
+        }
+    }
+
+    private func eventTypeRow(_ type: EventTypeChoice) -> some View {
+        let selected = eventTypes.contains(type.slug)
+        return Button {
+            if isEditing {
+                eventTypes = [type.slug]
+            } else if selected {
+                eventTypes.remove(type.slug)
+            } else {
+                eventTypes.insert(type.slug)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Text(type.name).font(.body).foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(selected ? BBColor.event : Color.secondary.opacity(0.5))
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 15).padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// An event type on offer: its slug (what an event stores) and its name.
+    struct EventTypeChoice: Equatable {
+        let slug: String
+        let name: String
+    }
+
+    /// The cached event types by name, and an edited event's own type even if this phone hasn't
+    /// synced it (shown by its slug).
+    private var eventTypeChoices: [EventTypeChoice] {
+        Self.eventTypeChoices(eventTypeRecords, keeping: isEditing ? eventTypes.first : nil)
+    }
+
+    static func eventTypeChoices(_ records: [LocalEntity], keeping current: String?) -> [EventTypeChoice] {
+        var choices = records.compactMap { entity -> EventTypeChoice? in
+            guard entity.kind == .eventType, entity.syncState != .pendingDelete,
+                  let slug = entity.payloadObject["slug"] as? String, !slug.isEmpty else { return nil }
+            let name = entity.payloadObject["name"] as? String ?? ""
+            return EventTypeChoice(slug: slug, name: name.isEmpty ? slug : name)
+        }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        if let current, !choices.contains(where: { $0.slug == current }) {
+            choices.append(EventTypeChoice(slug: current, name: current))
+        }
+        return choices
     }
 
     private var feedingDetails: some View {
@@ -692,7 +775,7 @@ struct EntityEditorView: View {
     private var draft: ActivityDraft {
         ActivityDraft(kind: kind, start: start, end: end, time: time, date: date,
                       amount: amount, value: value, dosage: dosage,
-                      noteText: noteText, medName: medName)
+                      noteText: noteText, medName: medName, eventTypeCount: eventTypes.count)
     }
 
     private var problem: ActivityProblem? { draft.problem }
@@ -819,6 +902,7 @@ struct EntityEditorView: View {
     // MARK: Load / save
 
     private func populate() {
+        if entity == nil, let eventTypePreset { eventTypes = [eventTypePreset] }
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
             if let s = timer.payloadObject["start"] as? String, let d = APIDate.parse(s) { start = d }
@@ -840,6 +924,7 @@ struct EntityEditorView: View {
         if let t = p["type"] as? String, let ft = FeedingType(rawValue: t) { feedingType = ft }
         if let m = p["method"] as? String, let fm = FeedingMethod(rawValue: m) { feedingMethod = fm }
         if let a = p["amount"] as? Double { amount = trimmed(a) }
+        if kind == .event, let type = p["type"] as? String, !type.isEmpty { eventTypes = [type] }
         wet = p["wet"] as? Bool ?? wet
         solid = p["solid"] as? Bool ?? solid
         if let c = p["color"] as? String { color = DiaperColor(rawValue: c) }
@@ -879,6 +964,12 @@ struct EntityEditorView: View {
         } else if let entity {
             repo.update(entity, payload: payload)
             target = entity
+        } else if kind == .event {
+            // One event per chosen type, all at the same time, so each type's "time since" is right.
+            let payloads = Self.eventPayloads(child: childID, types: eventTypes,
+                                              time: APIDate.isoDateTime.string(from: time),
+                                              notes: notes, tags: tagNames)
+            target = payloads.compactMap { repo.create(kind: .event, payload: $0, source: source) }.last
         } else {
             target = repo.create(kind: kind, payload: payload, source: source)
         }
@@ -958,12 +1049,24 @@ struct EntityEditorView: View {
             p["dosage_unit"] = dosageUnit
             p["next_dose_interval"] = doseIntervalSeconds.map(APIDuration.string(from:)) ?? NSNull()
             p["notes"] = notes; p["tags"] = tagList
-        case .timer, .child:
+        case .event:
+            p = Self.eventPayloads(child: childID, types: Set(eventTypes.prefix(1)), time: iso(time),
+                                   notes: notes, tags: tagList).first ?? p
+        case .timer, .child, .eventType:
             break
         }
         // Preserve the server id when editing so the payload round-trips.
         if let id = entity?.serverID { p["id"] = id }
         return p
+    }
+
+    /// The events a save creates: one per chosen event type (by slug), all for `child` at the
+    /// identical `time`, with the same notes and tags. Sorted by slug so the order is stable.
+    static func eventPayloads(child: Int, types: Set<String>, time: String, notes: String,
+                              tags: [String]) -> [[String: Any]] {
+        types.sorted().map { slug in
+            ["child": child, "type": slug, "time": time, "notes": notes, "tags": tags]
+        }
     }
 
     /// The chosen next-dose interval in seconds; a blank or zero custom entry means none.

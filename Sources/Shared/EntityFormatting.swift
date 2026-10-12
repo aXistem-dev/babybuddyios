@@ -2,8 +2,13 @@ import Foundation
 
 /// Renders a cached ``LocalEntity`` payload into human-readable text for lists and cards.
 enum EntityFormatting {
+    /// The kind's name; for an event, its type's name ("Bath"), else its slug, else "Event".
     static func title(_ entity: LocalEntity) -> String {
-        entity.kind.displayName
+        guard entity.kind == .event else { return entity.kind.displayName }
+        guard let slug = entity.payloadObject["type"] as? String, !slug.isEmpty else {
+            return entity.kind.displayName
+        }
+        return EventsCapability.name(forSlug: slug)
     }
 
     static func subtitle(_ entity: LocalEntity) -> String? { subtitle(entity, unit: .current) }
@@ -59,6 +64,11 @@ enum EntityFormatting {
             return [p["name"] as? String, dosage(entity)].compactMap { $0 }.joined(separator: " · ")
         case .child:
             return nil
+        case .event:
+            let notes = (p["notes"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return notes.isEmpty ? nil : notes
+        case .eventType:
+            return p["name"] as? String
         }
     }
 

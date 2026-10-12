@@ -79,7 +79,36 @@ actor SyncActor {
         if !pulledAnyKind, let serverError {
             return Self.fail(serverError, endpoint: "all", changed: changed)
         }
+        if await refreshEvents(client: client) { changed = true }
+        if refreshEventTypeNames() { changed = true }
         return PullOutcome(error: nil, changed: changed)
+    }
+
+    /// Cache the pulled event types' names by slug, for the rows that name an event (see
+    /// ``EventsCapability``). Returns whether they changed, so a rename shows without new events.
+    private func refreshEventTypeNames() -> Bool {
+        let before = EventsCapability.typeNames
+        guard EventsCapability.isSupported else { return false }
+        let kind = EntityKind.eventType.rawValue
+        let types = (try? modelContext.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        EventsCapability.store(typesIn: types)
+        return EventsCapability.typeNames != before
+    }
+
+    /// Refresh whether the server has events (its API root lists the event routes). Never fails the
+    /// sync: a network or HTTP error keeps what was known. Returns whether it changed, so the pull
+    /// counts as a change and what shows events refreshes.
+    private func refreshEvents(client: APIClient) async -> Bool {
+        let hadEvents = EventsCapability.isSupported
+        do {
+            EventsCapability.update(rootJSON: try await client.getRawPath(""))
+        } catch let error as APIError {
+            Analytics.report(error, context: "pull-events")
+        } catch {
+            Analytics.error(network: "pull-events")
+        }
+        return EventsCapability.isSupported != hadEvents
     }
 
     /// Report a pull failure and turn it into the outcome the caller surfaces. `endpoint` is the

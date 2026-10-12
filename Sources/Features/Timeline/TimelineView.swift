@@ -231,8 +231,10 @@ struct TimelineView: View {
     /// only built for the already-narrowed set.
     private var visibleEntities: [LocalEntity] {
         let childName = selectedChildName
+        let showsEvents = EventsCapability.isSupported
         return events.filter {
-            (kindFilter == nil || $0.kind == kindFilter)
+            guard showsEvents || $0.kind != EntityKind.event else { return false }
+            return (kindFilter == nil || $0.kind == kindFilter)
                 && TimelineFiltering.inDateRange($0.timestamp, from: dateFrom, to: dateTo)
                 && TimelineFiltering.matchesSearch($0, query: searchText, childName: childName)
         }
@@ -502,6 +504,12 @@ private struct TimelineFiltersView: View {
 
     private var hasActiveFilters: Bool { kindFilter != nil || dateFrom != nil || dateTo != nil }
 
+    /// The timeline's kinds, less the event on a server without events, which has no such records
+    /// to filter to.
+    private var filterKinds: [EntityKind] {
+        EntityKind.timelineKinds.filter { $0 != .event || EventsCapability.isSupported }
+    }
+
     /// Default seed when a date bound is first enabled: 30 days back for "from", today for "to".
     private var defaultFrom: Date {
         Calendar.current.date(byAdding: .day, value: -30, to: Calendar.current.startOfDay(for: .now)) ?? .now
@@ -513,7 +521,7 @@ private struct TimelineFiltersView: View {
                 Section("Activity Type") {
                     Picker("Type", selection: $kindFilter) {
                         Text("All Types").tag(EntityKind?.none)
-                        ForEach(EntityKind.timelineKinds) { kind in
+                        ForEach(filterKinds) { kind in
                             Text(kind.displayName).tag(EntityKind?.some(kind))
                         }
                     }

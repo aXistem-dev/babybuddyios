@@ -18,6 +18,11 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     case temperature
     case bmi
     case medication
+    /// A user-defined event type ("Bath", "Nail trim"). Only on servers with events; see
+    /// `EventsCapability`. Types are data from the server: the app never names any.
+    case eventType
+    /// Something that happened to a child at a time, of one ``eventType``, referenced by its slug.
+    case event
 
     var id: String { rawValue }
 
@@ -38,6 +43,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .temperature: return "temperature"
         case .bmi: return "bmi"
         case .medication: return "medication"
+        case .eventType: return "event-types"
+        case .event: return "events"
         }
     }
 
@@ -46,9 +53,12 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     var timeField: String {
         switch self {
         case .feeding, .sleep, .tummyTime, .pumping, .timer: return "start"
-        case .change, .note, .temperature, .medication: return "time"
+        case .change, .note, .temperature, .medication, .event: return "time"
         case .weight, .height, .headCircumference, .bmi: return "date"
         case .child: return "birth_date"
+        // Event types have no timestamp: `timestamp(from:)` falls back to `.distantPast`, and
+        // ordering by name keeps the list request valid.
+        case .eventType: return "name"
         }
     }
 
@@ -57,11 +67,12 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     /// measurements are infrequent *and* the API exposes no range filter for them
     /// (`filterset_fields = ("child", "date")` — exact match only), so all four are always
     /// pulled in full. The remaining high-volume event kinds are windowed.
+    /// Events are windowed like notes (`date_min`/`date_max` on `time`); their types are metadata.
     var isWindowed: Bool {
         switch self {
-        case .feeding, .change, .sleep, .tummyTime, .pumping, .note, .temperature, .medication:
+        case .feeding, .change, .sleep, .tummyTime, .pumping, .note, .temperature, .medication, .event:
             return true
-        case .child, .timer, .weight, .height, .headCircumference, .bmi:
+        case .child, .timer, .weight, .height, .headCircumference, .bmi, .eventType:
             return false
         }
     }
@@ -92,6 +103,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .temperature: return "Temperature"
         case .bmi: return "BMI"
         case .medication: return "Medication"
+        case .eventType: return "Event type"
+        case .event: return "Event"
         }
     }
 
@@ -111,6 +124,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .temperature: return "thermometer.medium"
         case .bmi: return "chart.bar"
         case .medication: return "pills.fill"
+        case .eventType: return "tag"
+        case .event: return "checkmark.circle"
         }
     }
 
@@ -124,9 +139,10 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// Kinds shown in the merged activity timeline (excludes Child, which is metadata).
+    /// Kinds shown in the merged activity timeline (excludes Child and Event type, which are
+    /// metadata).
     static var timelineKinds: [EntityKind] {
-        [.feeding, .change, .sleep, .tummyTime, .pumping, .note, .temperature,
+        [.feeding, .change, .sleep, .tummyTime, .pumping, .event, .note, .temperature,
          .medication, .weight, .height, .headCircumference, .bmi]
     }
 
