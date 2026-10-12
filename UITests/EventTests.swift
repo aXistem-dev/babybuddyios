@@ -13,12 +13,13 @@ final class EventTests: UITestCase {
         if scrollToEvents { app.scrollViews.firstMatch.swipeUp() }
     }
 
-    /// One tap on an event type logs it for the child now: the Last events card moves from the
-    /// seeded massage to one just now, and the undo toast names it.
+    /// One tap on an event type logs it for the child now: Home's Latest row for events moves from
+    /// the demo's newest event to it, and the undo toast names it.
     func testLogEventFromQuickAdd() {
         launch()
-        // Until the demo child is selected, Home shows nobody's events: wait for the demo's massage.
-        let before = expect(elements("label BEGINSWITH 'Massage, ' AND NOT (label ENDSWITH 'never')").firstMatch).label
+        // Until the demo child is selected, Home shows nobody's records: wait for its newest event.
+        expect(element(labeled: "Outfit change, "))
+        XCTAssertFalse(element(labeled: "Massage, ").exists, "Latest shows only the newest event")
 
         openAddActivity()
         expect(app.staticTexts["EVENTS"]) // section headers are drawn in capitals
@@ -26,10 +27,8 @@ final class EventTests: UITestCase {
         expectGone(app.navigationBars["Add Activity"])
 
         expect(element(labeled: "Logged massage"))
-        let after = expect(element(labeled: "Massage, ")).label
-        XCTAssertNotEqual(after, before, "The card shows the new massage")
-        XCTAssertTrue(after == "Massage, now" || after.hasSuffix("seconds ago") || after.hasSuffix("second ago"),
-                      "A massage just now, not \(after)")
+        expect(element(labeled: "Massage, "))
+        XCTAssertFalse(element(labeled: "Outfit change, ").exists, "One row for events, the newest")
     }
 
     /// Several types at once: "New event…" opens the editor, where each ticked type becomes its own
@@ -65,31 +64,15 @@ final class EventTests: UITestCase {
         XCTAssertFalse(elements("label BEGINSWITH 'Massage, Together'").firstMatch.exists)
     }
 
-    /// Home lists the child's newest events, each with how long ago it was.
-    func testLastEventsCard() {
+    /// Home treats events like every other kind: one Latest row, the newest event, which opens the
+    /// timeline filtered to events.
+    func testLatestEventRowOpensFilteredTimeline() {
         launch()
-        expect(app.staticTexts["LAST EVENTS"]) // section headers are drawn in capitals
-        expect(element(labeled: "Outfit change, "))
-        expect(element(labeled: "Massage, "))
-        expect(element(labeled: "Nail trim, "))
         tap(element(labeled: "Outfit change, "))
-        expect(app.navigationBars["Edit Event"])
-    }
-
-    /// Home's card keeps to the child's 5 newest events: two more push the oldest massage out.
-    func testLastEventsCardShowsFiveNewest() {
-        launch()
-        let rows = "label MATCHES '^(Massage|Nail trim|Outfit change|Tooth brushing|Sunscreen|Haircut), .*'"
-        expect(element(labeled: "Outfit change, "))
-        XCTAssertEqual(elements(rows).count, 4, "The demo child's four events")
-        for _ in 1...2 {
-            openAddActivity()
-            tap(app.buttons["Log Sunscreen"])
-            expectGone(app.navigationBars["Add Activity"])
-        }
-        expect(element(labeled: "Sunscreen, "))
-        XCTAssertEqual(elements(rows).count, 5)
-        XCTAssertEqual(elements("label BEGINSWITH 'Massage, '").count, 1, "The older massage dropped out")
+        expect(app.navigationBars["Timeline"])
+        XCTAssertFalse(app.navigationBars["Edit Event"].exists)
+        expect(element(labeled: "Massage, "))
+        XCTAssertEqual(elements("label BEGINSWITH 'Feeding, '").count, 0, "Only events pass the filter")
     }
 
     /// Add Activity offers the child's 5 most used event types, unused ones by name, and "New
@@ -148,6 +131,27 @@ final class EventTests: UITestCase {
         XCTAssertFalse(app.buttons["Stroller walk"].exists)
     }
 
+    /// The way to manage event types is where they're used too: under the editor's type list, and in
+    /// the timeline's filter once it's on events.
+    func testManageEventTypesFromEditorAndFilter() {
+        launch()
+        openAddActivity()
+        tap(app.buttons["New event\u{2026}"])
+        expect(app.navigationBars["New Event"])
+        tap(app.buttons["Manage event types"])
+        expect(app.navigationBars["Event types"])
+        expect(app.buttons["Massage"])
+        tap(app.navigationBars["Event types"].buttons.element(boundBy: 0)) // back
+        tap(app.navigationBars["New Event"].buttons["Cancel"])
+
+        tap(app.tabBars.buttons["Timeline"])
+        tap(app.buttons["Filters"])
+        tap(app.buttons.labeled("Type"))
+        tap(app.buttons["Event"])
+        tap(app.buttons["Manage event types"])
+        expect(app.navigationBars["Event types"])
+    }
+
     /// A type that events still use can't be deleted: the server's reason shows.
     func testDeletingUsedTypeIsRefused() {
         launch(["BB_START_TAB": "settings"])
@@ -165,5 +169,13 @@ final class EventTests: UITestCase {
         expect(app.navigationBars["Settings"])
         XCTAssertFalse(app.buttons.labeled("Event types").exists)
         XCTAssertFalse(app.staticTexts["EVENTS"].exists)
+
+        tap(app.tabBars.buttons["Home"])
+        tap(app.buttons["Add"])
+        tap(app.buttons.labeled("More\u{2026}"))
+        app.scrollViews.firstMatch.swipeUp()
+        tap(app.buttons["New event\u{2026}"])
+        expect(app.navigationBars["New Event"])
+        XCTAssertFalse(app.buttons["Manage event types"].exists)
     }
 }

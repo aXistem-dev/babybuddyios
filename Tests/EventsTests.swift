@@ -140,23 +140,16 @@ final class EventsTests: XCTestCase {
         XCTAssertEqual(EntityFormatting.title(entity(.note, ["child": 1, "time": iso(1)])), "Note")
     }
 
-    // MARK: v2: last events and most used
+    // MARK: v2: permissions route and most used
 
     private func choice(_ slug: String, _ name: String) -> EntityEditorView.EventTypeChoice {
         .init(slug: slug, name: name)
     }
 
-    /// Home shows the child's 5 newest events, newest first; a type can come up more than once, and
-    /// other children's and deleted events don't count.
-    func testLastEvents() {
-        let events = [event("massage", hoursAgo: 50), event("massage", hoursAgo: 26), event("nail-trim", hoursAgo: 26),
-                      event("outfit", hoursAgo: 3), event("massage", hoursAgo: 1), event("hair", hoursAgo: 70),
-                      event("massage", hoursAgo: 0.5, child: 2), event("hair", hoursAgo: 0.2, state: .pendingDelete),
-                      entity(.note, ["child": 1, "time": iso(0.1)])]
-        let last = EventUsage.lastEvents(events, child: 1)
-        XCTAssertEqual(last.map { $0.payloadObject["type"] as? String }, ["massage", "outfit", "massage", "nail-trim", "massage"])
-        XCTAssertEqual(last.first?.timestamp, now.addingTimeInterval(-3600))
-        XCTAssertTrue(EventUsage.lastEvents(events, child: 3).isEmpty)
+    /// The type list (where the permissions come from) is asked for with its trailing slash: without
+    /// it the server redirects, the redirect drops the token, and the permissions never arrive.
+    func testTypeListPathHasTrailingSlash() {
+        XCTAssertEqual(EventsCapability.typeListPath, "event-types/")
     }
 
     /// The most used types for the child over the last 30 days come first; a tie goes to the most
