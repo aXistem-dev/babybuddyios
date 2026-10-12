@@ -71,9 +71,28 @@ enum EventsCapability {
         var add = false
         var change = false
         var delete = false
+        /// May delete a type together with its events (deleting both types and events); false on a
+        /// server from before this flag.
+        var deleteWithEvents = false
 
         /// Whether there's anything to manage at all.
         var any: Bool { add || change || delete }
+
+        init(add: Bool = false, change: Bool = false, delete: Bool = false, deleteWithEvents: Bool = false) {
+            self.add = add
+            self.change = change
+            self.delete = delete
+            self.deleteWithEvents = deleteWithEvents
+        }
+
+        /// A flag missing from the cache (one written before it existed) reads as false.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            add = try c.decodeIfPresent(Bool.self, forKey: .add) ?? false
+            change = try c.decodeIfPresent(Bool.self, forKey: .change) ?? false
+            delete = try c.decodeIfPresent(Bool.self, forKey: .delete) ?? false
+            deleteWithEvents = try c.decodeIfPresent(Bool.self, forKey: .deleteWithEvents) ?? false
+        }
     }
 
     /// The last permissions the server sent; all false until then, and on an older server.
@@ -99,7 +118,8 @@ enum EventsCapability {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let p = root["permissions"] as? [String: Any] else { return Permissions() }
         return Permissions(add: p["add"] as? Bool ?? false, change: p["change"] as? Bool ?? false,
-                           delete: p["delete"] as? Bool ?? false)
+                           delete: p["delete"] as? Bool ?? false,
+                           deleteWithEvents: p["delete_with_events"] as? Bool ?? false)
     }
 
     static func store(typeNames: [String: String]) {
