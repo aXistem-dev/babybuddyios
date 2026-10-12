@@ -19,6 +19,7 @@ enum EntityFormatting {
             if let m = p["method"] as? String { parts.append(m.capitalized) }
             if let d = duration(entity) { parts.append(d) }
             if let a = p["amount"] as? Double { parts.append(formatAmount(a)) }
+            if p["from_stash"] as? Bool == true { parts.append("From the stash") }
             return parts.joined(separator: " · ")
         case .change:
             var flags: [String] = []
@@ -40,6 +41,7 @@ enum EntityFormatting {
             var parts: [String] = []
             if let d = duration(entity) { parts.append(d) }
             if let a = p["amount"] as? Double { parts.append(formatAmount(a)) }
+            if p["to_stash"] as? Bool == true { parts.append("Into the stash") }
             return parts.joined(separator: " · ")
         case .note:
             return p["note"] as? String

@@ -61,8 +61,12 @@ struct EntityEditorView: View {
     @State private var feedingType: FeedingType = .breastMilk
     @State private var feedingMethod: FeedingMethod = .leftBreast
     @State private var amount = ""
-    // Milk stash entry
+    // Milk stash
     @State private var stashKind: StashKind = .added
+    @State private var toStash = false
+    @State private var fromStash = false
+    @AppStorage(StashCapability.pumpingToStashKey) private var lastToStash = false
+    @AppStorage(StashCapability.bottleFromStashKey) private var lastFromStash = false
     // Diaper
     @State private var wet = true
     @State private var solid = false
@@ -386,7 +390,14 @@ struct EntityEditorView: View {
                 TextField("Milestone", text: $milestone, axis: .vertical).lineLimit(1...3)
             }
         case .pumping:
-            BBCard(cornerRadius: BBRadius.tile) { fieldLabeled("Amount") { amountStepper } }
+            VStack(spacing: 12) {
+                BBCard(cornerRadius: BBRadius.tile) { fieldLabeled("Amount") { amountStepper } }
+                if StashCapability.isSupported {
+                    BBCard(cornerRadius: BBRadius.tile, padding: 0) {
+                        toggleRow("Into the milk stash", isOn: $toStash)
+                    }
+                }
+            }
         case .note:
             BBCard(cornerRadius: BBRadius.tile) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -424,18 +435,32 @@ struct EntityEditorView: View {
     }
 
     private var feedingDetails: some View {
-        BBCard(cornerRadius: BBRadius.tile) {
-            VStack(alignment: .leading, spacing: 16) {
-                fieldLabeled("Type") {
-                    BBSegmentedControl(selection: $feedingType,
-                                       options: FeedingType.allCases) { $0.shortLabel }
+        VStack(spacing: 12) {
+            BBCard(cornerRadius: BBRadius.tile) {
+                VStack(alignment: .leading, spacing: 16) {
+                    fieldLabeled("Type") {
+                        BBSegmentedControl(selection: $feedingType,
+                                           options: FeedingType.allCases) { $0.shortLabel }
+                    }
+                    fieldLabeled("Method") {
+                        menuField(options: FeedingMethod.allCases, selection: $feedingMethod) { $0.label }
+                    }
+                    fieldLabeled("Amount") { amountStepper }
                 }
-                fieldLabeled("Method") {
-                    menuField(options: FeedingMethod.allCases, selection: $feedingMethod) { $0.label }
+            }
+            if canComeFromStash {
+                BBCard(cornerRadius: BBRadius.tile, padding: 0) {
+                    toggleRow("From the milk stash", isOn: $fromStash)
                 }
-                fieldLabeled("Amount") { amountStepper }
             }
         }
+    }
+
+    /// Whether this feed can be marked as taken from the milk stash: the server has it, and the
+    /// feed is breast milk from a bottle (or another way than the breast) with an amount.
+    private var canComeFromStash: Bool {
+        StashCapability.isSupported && StashCapability.canComeFromStash(
+            type: feedingType, method: feedingMethod, amount: ActivityDraft.number(amount))
     }
 
     private var changeDetails: some View {
@@ -835,6 +860,10 @@ struct EntityEditorView: View {
     // MARK: Load / save
 
     private func populate() {
+        if entity == nil {
+            toStash = lastToStash
+            fromStash = lastFromStash
+        }
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
             if let s = timer.payloadObject["start"] as? String, let d = APIDate.parse(s) { start = d }
@@ -856,6 +885,10 @@ struct EntityEditorView: View {
         if let t = p["type"] as? String, let ft = FeedingType(rawValue: t) { feedingType = ft }
         if let m = p["method"] as? String, let fm = FeedingMethod(rawValue: m) { feedingMethod = fm }
         if let k = p["kind"] as? String, let sk = StashKind(rawValue: k) { stashKind = sk }
+        if entity != nil {
+            toStash = p["to_stash"] as? Bool ?? false
+            fromStash = p["from_stash"] as? Bool ?? false
+        }
         if let a = p["amount"] as? Double { amount = trimmed(a) }
         wet = p["wet"] as? Bool ?? wet
         solid = p["solid"] as? Bool ?? solid
@@ -885,6 +918,8 @@ struct EntityEditorView: View {
 
     private func save() {
         let payload = buildPayload()
+        if kind == .pumping, StashCapability.isSupported { lastToStash = toStash }
+        if kind == .feeding, canComeFromStash { lastFromStash = fromStash }
         let repo = LocalRepository(context: context)
         let target: LocalEntity?
         if let sourceTimer {
@@ -943,6 +978,7 @@ struct EntityEditorView: View {
             p["start"] = iso(start); p["end"] = iso(end)
             p["type"] = feedingType.rawValue; p["method"] = feedingMethod.rawValue
             if let a = ActivityDraft.number(amount) { p["amount"] = a }
+            if StashCapability.isSupported { p["from_stash"] = fromStash && canComeFromStash }
             p["notes"] = notes; p["tags"] = tagList
         case .change:
             p["time"] = iso(time); p["wet"] = wet; p["solid"] = solid
@@ -957,6 +993,7 @@ struct EntityEditorView: View {
         case .pumping:
             p["start"] = iso(start); p["end"] = iso(end)
             if let a = ActivityDraft.number(amount) { p["amount"] = a }
+            if StashCapability.isSupported { p["to_stash"] = toStash }
             p["notes"] = notes; p["tags"] = tagList
         case .note:
             p["time"] = iso(time); p["note"] = noteText; p["tags"] = tagList
