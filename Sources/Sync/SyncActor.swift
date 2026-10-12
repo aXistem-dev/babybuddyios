@@ -39,9 +39,11 @@ actor SyncActor {
             Analytics.error(network: "pull-unknown")
             return PullOutcome(error: error.localizedDescription, changed: changed)
         }
+        // First, so the kinds below know whether to pull milk stash entries.
+        if await refreshStash(client: client) { changed = true }
         var serverError: APIError?   // last 5xx seen; surfaced only if *every* kind fails this way
         var pulledAnyKind = false
-        for kind in EntityKind.allCases {
+        for kind in EntityKind.syncedKinds {
             do {
                 try await pull(kind: kind, client: client, windowDays: windowDays)
                 // Save only when the pull actually changed something: an unchanged kind's save
@@ -80,6 +82,34 @@ actor SyncActor {
             return Self.fail(serverError, endpoint: "all", changed: changed)
         }
         return PullOutcome(error: nil, changed: changed)
+    }
+
+    /// Refresh whether the server has the milk stash for this user (its API root lists the stash
+    /// routes, and the stash answers) and the cached summary. Never fails the sync: a network or
+    /// server error keeps what was cached. Returns whether either changed, so what shows the stash
+    /// refreshes.
+    private func refreshStash(client: APIClient) async -> Bool {
+        let previous = StashCapability.summary
+        do {
+            let root = try await client.getRawPath("")
+            if StashCapability.listsStash(rootJSON: root) {
+                let data = try await client.getRawPath("stash")
+                StashCapability.store(summary: try APICoders.decoder.decode(StashSummaryDTO.self, from: data))
+            } else {
+                StashCapability.store(summary: nil)
+            }
+        } catch APIError.forbidden {
+            // A user the server doesn't show the stash to (a caregiver) gets the app without it.
+            StashCapability.store(summary: nil)
+        } catch let error as APIError {
+            Analytics.report(error, context: "pull-stash")
+        } catch is DecodingError {
+            Analytics.report(.decoding("stash"), context: "pull-stash")
+            StashCapability.store(summary: nil)
+        } catch {
+            Analytics.error(network: "pull-stash")
+        }
+        return StashCapability.summary != previous
     }
 
     /// Report a pull failure and turn it into the outcome the caller surfaces. `endpoint` is the
@@ -142,7 +172,7 @@ actor SyncActor {
         let client = APIClient(config: config)
         var serverError: String?     // last 5xx seen; surfaced only if *every* kind fails this way
         var pulledAnyKind = false
-        for kind in EntityKind.allCases where kind.isWindowed {
+        for kind in EntityKind.syncedKinds where kind.isWindowed {
             do {
                 var query = ListQuery(ordering: "-\(kind.timeField)")
                 query.timeParam = kind.rangeFilterParam

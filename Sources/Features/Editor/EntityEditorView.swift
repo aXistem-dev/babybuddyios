@@ -35,8 +35,10 @@ struct EntityEditorView: View {
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
 
+    /// `stashKind` and `amount` start a new milk stash entry: "Discard milk" with the expired amount.
     init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil,
-         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor) {
+         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor,
+         stashKind: StashKind = .added, amount: Double? = nil) {
         self.childID = childID
         self.entity = entity
         self.sourceTimer = sourceTimer
@@ -44,6 +46,8 @@ struct EntityEditorView: View {
         self.source = source
         _kind = State(initialValue: kind)
         _selectedChildID = State(initialValue: childID)
+        _stashKind = State(initialValue: stashKind)
+        _amount = State(initialValue: amount.map { $0 == $0.rounded() ? String(Int($0)) : String($0) } ?? "")
     }
 
     // Common fields
@@ -57,6 +61,8 @@ struct EntityEditorView: View {
     @State private var feedingType: FeedingType = .breastMilk
     @State private var feedingMethod: FeedingMethod = .leftBreast
     @State private var amount = ""
+    // Milk stash entry
+    @State private var stashKind: StashKind = .added
     // Diaper
     @State private var wet = true
     @State private var solid = false
@@ -99,6 +105,7 @@ struct EntityEditorView: View {
 
     private var navTitle: String {
         if isConverting { return "Convert to \(kind.displayName)" }
+        if kind == .stashAdjustment, !isEditing { return stashKind == .added ? "Add Milk" : "Discard Milk" }
         return "\(isEditing ? "Edit" : "New") \(kind.displayName)"
     }
 
@@ -270,7 +277,7 @@ struct EntityEditorView: View {
     /// Reassigning is only meaningful once a record exists (there's nothing to move yet while
     /// creating) and only offered when the family has more than one child to move it to — the
     /// same gate the Dashboard/Settings child switcher uses.
-    private var showsChildPicker: Bool { isEditing && children.count > 1 }
+    private var showsChildPicker: Bool { isEditing && children.count > 1 && kind != .stashAdjustment }
 
     @ViewBuilder private var babySection: some View {
         if showsChildPicker {
@@ -324,7 +331,7 @@ struct EntityEditorView: View {
                     pickerRow("Start", selection: $start, components: [.date, .hourAndMinute])
                     rowDivider
                     endRow
-                case .change, .note, .temperature, .medication:
+                case .change, .note, .temperature, .medication, .stashAdjustment:
                     pickerRow("Time", selection: $time, components: [.date, .hourAndMinute])
                 case .weight, .height, .headCircumference, .bmi:
                     pickerRow("Date", selection: $date, components: .date)
@@ -402,6 +409,15 @@ struct EntityEditorView: View {
             }
         case .medication:
             medicationDetails
+        case .stashAdjustment:
+            BBCard(cornerRadius: BBRadius.tile) {
+                VStack(alignment: .leading, spacing: 16) {
+                    fieldLabeled("Milk") {
+                        BBSegmentedControl(selection: $stashKind, options: StashKind.allCases) { $0.label }
+                    }
+                    fieldLabeled("Amount") { amountStepper }
+                }
+            }
         case .timer, .child:
             EmptyView()
         }
@@ -839,6 +855,7 @@ struct EntityEditorView: View {
         tagNames = (p["tags"] as? [String]) ?? []
         if let t = p["type"] as? String, let ft = FeedingType(rawValue: t) { feedingType = ft }
         if let m = p["method"] as? String, let fm = FeedingMethod(rawValue: m) { feedingMethod = fm }
+        if let k = p["kind"] as? String, let sk = StashKind(rawValue: k) { stashKind = sk }
         if let a = p["amount"] as? Double { amount = trimmed(a) }
         wet = p["wet"] as? Bool ?? wet
         solid = p["solid"] as? Bool ?? solid
@@ -957,6 +974,11 @@ struct EntityEditorView: View {
             if let d = ActivityDraft.number(dosage) { p["dosage"] = d }
             p["dosage_unit"] = dosageUnit
             p["next_dose_interval"] = doseIntervalSeconds.map(APIDuration.string(from:)) ?? NSNull()
+            p["notes"] = notes; p["tags"] = tagList
+        case .stashAdjustment:
+            p.removeValue(forKey: "child")
+            p["time"] = iso(time); p["kind"] = stashKind.rawValue
+            p["amount"] = ActivityDraft.number(amount) ?? 0
             p["notes"] = notes; p["tags"] = tagList
         case .timer, .child:
             break

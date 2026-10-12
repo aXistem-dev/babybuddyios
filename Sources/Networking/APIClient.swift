@@ -204,6 +204,12 @@ final class APIClient {
         return all
     }
 
+    /// GET `<base>/api/<path>` as raw JSON, for a route that isn't a collection: `""` is the API
+    /// root, `"stash"` the milk stash.
+    func getRawPath(_ path: String) async throws -> Data {
+        try await sendRaw(try makeRequest(path: path, method: "GET"))
+    }
+
     func getRaw(path: String, id: Int) async throws -> Data {
         try await sendRaw(try makeRequest(path: "\(path)/\(id)/", method: "GET"))
     }
