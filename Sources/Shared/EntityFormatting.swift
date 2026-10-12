@@ -57,6 +57,9 @@ enum EntityFormatting {
             return (p["bmi"] as? Double).map { "\(trim($0))" }
         case .medication:
             return [p["name"] as? String, dosage(entity)].compactMap { $0 }.joined(separator: " · ")
+        case .stashAdjustment:
+            let kind = (p["kind"] as? String).flatMap(StashKind.init(rawValue:))?.label
+            return [kind, (p["amount"] as? Double).map(formatAmount)].compactMap { $0 }.joined(separator: " · ")
         case .child:
             return nil
         }

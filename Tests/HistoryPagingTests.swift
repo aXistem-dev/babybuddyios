@@ -13,7 +13,7 @@ final class HistoryPagingTests: XCTestCase {
     /// measurements are pulled in full (measurements expose no range filter on the API).
     func testWindowedKinds() {
         let windowed: Set<EntityKind> = [.feeding, .change, .sleep, .tummyTime, .pumping,
-                                         .note, .temperature, .medication]
+                                         .note, .temperature, .medication, .stashAdjustment]
         for kind in EntityKind.allCases {
             XCTAssertEqual(kind.isWindowed, windowed.contains(kind), "\(kind) windowing")
         }
@@ -26,7 +26,7 @@ final class HistoryPagingTests: XCTestCase {
         for kind in [EntityKind.feeding, .sleep, .tummyTime, .pumping] {
             XCTAssertEqual(kind.rangeFilterParam, "start", "\(kind) should filter on start")
         }
-        for kind in [EntityKind.change, .note, .temperature, .medication] {
+        for kind in [EntityKind.change, .note, .temperature, .medication, .stashAdjustment] {
             XCTAssertEqual(kind.rangeFilterParam, "date", "\(kind) should filter on date")
         }
     }

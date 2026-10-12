@@ -46,6 +46,26 @@ enum DiaperColor: String, Codable, CaseIterable, Identifiable {
     var label: String { rawValue.capitalized }
 }
 
+/// Which way a milk stash entry moves milk: into the stash, or out of it.
+enum StashKind: String, Codable, CaseIterable, Identifiable {
+    case added, discarded
+    var id: String { rawValue }
+    var label: String { self == .added ? "Added" : "Discarded" }
+}
+
+/// How old milk in the stash is.
+enum StashStatus: String, Codable {
+    case ok, warn, expired
+
+    var label: String {
+        switch self {
+        case .ok: return "Fresh"
+        case .warn: return "Expiring soon"
+        case .expired: return "Expired"
+        }
+    }
+}
+
 // MARK: - Resources
 //
 // Each DTO carries the full set of serializer fields. Read-only fields (`id`,
@@ -76,6 +96,8 @@ struct FeedingDTO: APIResource {
     var type: FeedingType
     var method: FeedingMethod
     var amount: Double?
+    /// Whether this bottle's milk came from the milk stash (a server with the milk stash only).
+    var from_stash: Bool?
     var notes: String?
     var tags: [String]?
     var timer: Int?
@@ -127,6 +149,8 @@ struct PumpingDTO: APIResource {
     var end: Date
     var duration: String?
     var amount: Double?
+    /// Whether the milk went into the milk stash (a server with the milk stash only).
+    var to_stash: Bool?
     var notes: String?
     var tags: [String]?
     var timer: Int?
@@ -212,6 +236,66 @@ struct MedicationDTO: APIResource {
     var next_dose_interval: String?
     var notes: String?
     var tags: [String]?
+}
+
+/// Milk added to the milk stash or discarded from it by hand.
+struct StashAdjustmentDTO: APIResource {
+    static let path = "stash-adjustments"
+    var id: Int?
+    var time: Date
+    var amount: Double
+    var kind: StashKind
+    var notes: String?
+    var tags: [String]?
+}
+
+/// Milk still in the stash from one moment (`GET /api/stash`).
+struct StashLotDTO: Codable, Equatable {
+    var time: Date
+    var amount: Double
+    var warn_at: Date
+    var expires_at: Date
+    /// The server's status when the summary was made; ``status(at:)`` is current.
+    var status: StashStatus
+
+    func status(at now: Date) -> StashStatus {
+        if now >= expires_at { return .expired }
+        if now >= warn_at { return .warn }
+        return .ok
+    }
+}
+
+/// The milk stash (`GET /api/stash`). The server works it out over the whole history, which the app
+/// only syncs a recent window of.
+struct StashSummaryDTO: Codable, Equatable {
+    /// Below zero when more was taken out than was put in; the lots are empty then.
+    var balance: Double
+    var status: StashStatus
+    var warn_age_hours: Double
+    var max_age_hours: Double
+    var expired_amount: Double
+    /// Oldest first.
+    var lots: [StashLotDTO]
+
+    /// The status of the oldest milk at `now`.
+    func status(at now: Date) -> StashStatus {
+        lots.map { $0.status(at: now) }.max { $0.rank < $1.rank } ?? .ok
+    }
+
+    /// How much of the milk has expired at `now`.
+    func expiredAmount(at now: Date) -> Double {
+        lots.filter { $0.status(at: now) == .expired }.reduce(0) { $0 + $1.amount }
+    }
+}
+
+private extension StashStatus {
+    var rank: Int {
+        switch self {
+        case .ok: return 0
+        case .warn: return 1
+        case .expired: return 2
+        }
+    }
 }
 
 struct TagDTO: Codable, Identifiable, Hashable {
