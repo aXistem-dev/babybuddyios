@@ -3,8 +3,9 @@ import Foundation
 /// Whether the connected server has the milk stash, and the last stash summary it returned. Kept in
 /// the App Group's defaults so the widgets can read it too.
 enum StashCapability {
-    private static let supportedKey = "stashSupported"
-    private static let summaryKey = "stashSummary"
+    /// Watched by the views that show the stash, so a sync that finds or drops it shows at once.
+    static let supportedKey = "stashSupported"
+    static let summaryKey = "stashSummary"
 
     /// The phone's last choice of "Into the milk stash" on pumping and "From the milk stash" on a
     /// bottle, which the next one starts with (`UserDefaults.standard`).
@@ -24,9 +25,11 @@ enum StashCapability {
 
     static var isSupported: Bool { SharedDefaults.suite.bool(forKey: supportedKey) }
 
-    static var summary: StashSummaryDTO? {
-        guard let data = SharedDefaults.suite.data(forKey: summaryKey) else { return nil }
-        return try? APICoders.decoder.decode(StashSummaryDTO.self, from: data)
+    static var summary: StashSummaryDTO? { summary(from: SharedDefaults.suite.data(forKey: summaryKey)) }
+
+    /// The summary in `data`, as ``store(summary:)`` keeps it.
+    static func summary(from data: Data?) -> StashSummaryDTO? {
+        data.flatMap { try? APICoders.decoder.decode(StashSummaryDTO.self, from: $0) }
     }
 
     /// Whether the `GET /api/` root lists the stash routes.
