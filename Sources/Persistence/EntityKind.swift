@@ -18,7 +18,7 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     case temperature
     case bmi
     case medication
-    /// A user-defined event type ("Bath", "Nail trim"). Only on servers with events; see
+    /// A user-defined event type ("Massage", "Nail trim"). Only on servers with events; see
     /// `EventsCapability`. Types are data from the server: the app never names any.
     case eventType
     /// Something that happened to a child at a time, of one ``eventType``, referenced by its slug.
