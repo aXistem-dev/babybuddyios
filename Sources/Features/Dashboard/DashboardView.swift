@@ -246,6 +246,7 @@ struct DashboardView: View {
             .onChange(of: router.convertTarget) { _, target in openConvert(target) }
             .onChange(of: router.openDayKind) { _, kind in openDay(kind) }
             .onChange(of: router.repeatDoseLocalID) { _, id in openRepeatDose(id) }
+            .onChange(of: router.showStash) { _, show in openStash(show) }
             .onAppear {
                 // handle a deep link that arrived before this view existed
                 showTimer(router.openTimerLocalID)
@@ -253,6 +254,7 @@ struct DashboardView: View {
                 openConvert(router.convertTarget)
                 openDay(router.openDayKind)
                 openRepeatDose(router.repeatDoseLocalID)
+                openStash(router.showStash)
                 #if DEBUG
                 if let raw = ProcessInfo.processInfo.environment["BB_OPEN"], !children.isEmpty {
                     if raw == "timer", !startingTimer {
@@ -723,6 +725,13 @@ struct DashboardView: View {
         guard let kind else { return }
         navPath = [.day(kind)]
         router.openDayKind = nil
+    }
+
+    /// Push the milk stash screen for `babybuddy://stash`, on a server with the milk stash.
+    private func openStash(_ show: Bool) {
+        guard show else { return }
+        router.showStash = false
+        if stashSupported { navPath = [.stash] }
     }
 
     /// Stop tapped: the timer stops now, here and (once the DELETE lands) on the server, then the
