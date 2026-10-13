@@ -80,6 +80,25 @@ final class StashTests: UITestCase {
         XCTAssertTrue(lots.element(boundBy: 2).label.hasSuffix("Fresh"))
     }
 
+    /// A lot opens the record it came from: the 50-hour lot its pumping, the 75-hour lot the milk added
+    /// by hand. The 6-hour lot names no source, so it's not a button.
+    func testLotOpensItsSource() {
+        launch()
+        openStashFromAddSheet()
+        let lots = app.buttons.matching(NSPredicate(format: "label CONTAINS ', Stored '"))
+        expect(lots.firstMatch)
+        XCTAssertEqual(lots.count, 2, "Only the lots with a source this phone has")
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '150 ml, Stored '")).firstMatch.exists)
+
+        tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '120 ml, Stored '")).firstMatch)
+        let pumping = expect(app.navigationBars["Edit Pumping"])
+        tap(pumping.buttons["Cancel"])
+        expectGone(pumping)
+
+        tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '80 ml, Stored '")).firstMatch)
+        expect(app.navigationBars["Edit Milk Stash Entry"])
+    }
+
     /// Adding milk from the screen queues a milk stash entry, and throwing away expired milk waits
     /// until the server has it.
     func testAddMilkFromTheScreen() {
