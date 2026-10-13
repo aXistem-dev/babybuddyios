@@ -46,7 +46,7 @@ final class StashTests: UITestCase {
         expect(fromStash)
     }
 
-    /// Without the milk stash both editors are upstream's.
+    /// Without the milk stash neither editor shows a stash switch.
     func testNoStashSwitchesWithoutStash() {
         launch(["BB_NO_STASH": "1"])
         openEditor("Pumping")
