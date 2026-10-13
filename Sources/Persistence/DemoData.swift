@@ -114,22 +114,23 @@ enum DemoData {
 
     // MARK: Activities
 
-    /// Activities, as a server with them would hold them: three activity types without duration and
-    /// one with, and activities of them for the demo child, among them a bath and a pajama change at
-    /// the same time. Types 1–4, activities 5000+.
+    /// Activities, as a server with them would hold them: three activity types without duration, one
+    /// with, and an inactive one, and activities of the first four for the demo child, among them a
+    /// bath and a pajama change at the same time. Types 1–5, activities 5000+.
     @MainActor
     private static func seedActivities(into context: ModelContext) {
         let now = Date()
         func iso(_ minutesAgo: Double) -> String {
             APIDate.isoDateTime.string(from: now.addingTimeInterval(-minutesAgo * 60))
         }
-        for (id, name, slug, emoji, hasDuration) in [
-            (1, "Bath", "bath", "🛁", false), (2, "Pajama change", "pajama-change", "👕", false),
-            (3, "Bodysuit change", "bodysuit-change", "🩲", false), (4, "Walk", "walk", "🚶", true),
+        for (id, name, slug, emoji, hasDuration, active) in [
+            (1, "Bath", "bath", "🛁", false, true), (2, "Pajama change", "pajama-change", "👕", false, true),
+            (3, "Bodysuit change", "bodysuit-change", "🩲", false, true), (4, "Walk", "walk", "🚶", true, true),
+            (5, "Haircut", "haircut", "", false, false),
         ] {
             insert(.activityType, id: id, [
                 "id": id, "name": name, "slug": slug, "icon": "activities", "emoji": emoji,
-                "color": "#8455b8", "has_duration": hasDuration, "active": true, "order": id,
+                "color": "#8455b8", "has_duration": hasDuration, "active": active, "order": id,
             ], context)
         }
         let together = iso(26 * 60)

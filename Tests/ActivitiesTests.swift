@@ -226,4 +226,29 @@ final class ActivitiesTests: XCTestCase {
         XCTAssertNil(unknown.tileIcon)
         XCTAssertEqual(EntityFormatting.title(entity(.note, ["child": 1, "time": iso(1)])), "Note")
     }
+
+    // MARK: Most used
+
+    private func info(_ id: Int, _ name: String, active: Bool = true, order: Int = 0) -> ActivitiesCapability.TypeInfo {
+        ActivitiesCapability.TypeInfo(id: id, payload: ["name": name, "active": active, "order": order])
+    }
+
+    /// The child's most used active types in the last 30 days first; a tie goes to the type used most
+    /// recently, then to the server's order, and unused types fill the rest. Other children's,
+    /// deleted and older activities don't count.
+    func testTopTypes() {
+        let types = [info(1, "Bath", order: 1), info(2, "Walk", order: 2), info(3, "Pajama change", order: 3),
+                     info(4, "Bodysuit change", order: 4), info(5, "Haircut", active: false, order: 5)]
+        let activities = [
+            activity(2, start: 60), activity(2, start: 120),
+            activity(3, start: 30), activity(1, start: 240),
+            activity(1, start: 10, child: 2), activity(1, start: 20, state: .pendingDelete),
+            activity(4, start: 31 * 24 * 60), activity(5, start: 5),
+        ]
+        let top = ActivityUsage.topTypes(activities: activities, types: types, child: 1, now: now)
+        XCTAssertEqual(top.map(\.name), ["Walk", "Pajama change", "Bath", "Bodysuit change"],
+                       "Walk twice, then the newer of the two used once, then the unused; never the inactive")
+        XCTAssertEqual(ActivityUsage.topTypes(activities: activities, types: types, child: 1, now: now, limit: 2)
+            .map(\.name), ["Walk", "Pajama change"])
+    }
 }

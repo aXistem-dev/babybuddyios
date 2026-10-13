@@ -28,6 +28,8 @@ struct EntityEditorView: View {
     /// open display. It then has no navigation stack or Cancel of its own; Save, Repeat and Delete
     /// go in the Timeline's toolbar, and finishing calls this instead of dismissing.
     let onClose: (() -> Void)?
+    /// The activity type (by id) a new activity starts on; none, and the customer picks one.
+    let activityTypePreset: Int?
 
     /// The record kind. Mirrored into state so the top activity selector can swap it while
     /// creating; locked to the passed-in value when editing or converting.
@@ -41,13 +43,14 @@ struct EntityEditorView: View {
 
     init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil,
          template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor,
-         onClose: (() -> Void)? = nil) {
+         activityTypePreset: Int? = nil, onClose: (() -> Void)? = nil) {
         self.childID = childID
         self.entity = entity
         self.sourceTimer = sourceTimer
         self.template = template
         self.source = source
         self.onClose = onClose
+        self.activityTypePreset = activityTypePreset
         _kind = State(initialValue: kind)
         _selectedChildID = State(initialValue: childID)
     }
@@ -954,6 +957,7 @@ struct EntityEditorView: View {
     // MARK: Load / save
 
     private func populate() {
+        if entity == nil, let activityTypePreset { activityType = activityTypePreset }
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
             if let s = timer.payloadObject["start"] as? String, let d = APIDate.parse(s) { start = d }
