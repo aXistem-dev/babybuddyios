@@ -102,15 +102,18 @@ final class ActivityValidationTests: XCTestCase {
         }
     }
 
-    func testOrdinaryNowEntriesAreNotFlaky() {
-        // A form opened "now" and saved a moment later, plus a little clock skew the other way.
-        for offset in [0.0, -1, 30, 59] {
+    /// Nothing later than now, as the server has it: exactly now and earlier save, a second later
+    /// doesn't, for a start and for a time alike.
+    func testNothingLaterThanNow() {
+        for offset in [0.0, -1] {
             let moment = now.addingTimeInterval(offset)
-            let sleep = ActivityDraft(kind: .sleep, start: moment, end: moment, now: now)
-            XCTAssertNil(sleep.problem, "offset \(offset)")
-            let change = ActivityDraft(kind: .change, time: moment, now: now)
-            XCTAssertNil(change.problem, "offset \(offset)")
+            XCTAssertNil(ActivityDraft(kind: .sleep, start: moment, end: moment, now: now).problem, "offset \(offset)")
+            XCTAssertNil(ActivityDraft(kind: .change, time: moment, now: now).problem, "offset \(offset)")
         }
+        let second = now.addingTimeInterval(1)
+        XCTAssertEqual(ActivityDraft(kind: .sleep, start: second, end: second, now: now).problem, .futureTimestamp)
+        XCTAssertEqual(ActivityDraft(kind: .feeding, start: second, end: second, now: now).problem, .futureTimestamp)
+        XCTAssertEqual(ActivityDraft(kind: .change, time: second, now: now).problem, .futureTimestamp)
     }
 
     func testFutureTimeIsRejectedForTimestampedKinds() {
