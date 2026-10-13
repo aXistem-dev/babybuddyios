@@ -107,9 +107,10 @@ struct ActivityDraft {
         return nil
     }
 
-    /// A minute of slack: the phone's clock and a self-hosted server's rarely agree to the second,
-    /// and every ordinary entry is "now". The rejections telemetry saw were hours or days out.
-    private func isFuture(_ moment: Date) -> Bool { moment.timeIntervalSince(now) > 60 }
+    /// Later than now, as upstream's `validate_time` has it (`time > timezone.localtime()`): the
+    /// server refuses such a time, and a refused write is parked rather than retried. The editor
+    /// checks again with the moment Save is tapped, so a time filled in when it opened never counts.
+    private func isFuture(_ moment: Date) -> Bool { moment > now }
 
     private func isFutureDay(_ day: Date) -> Bool {
         let calendar = Calendar.current
