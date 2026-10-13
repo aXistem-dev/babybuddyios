@@ -39,6 +39,8 @@ struct DashboardView: View {
     /// A convert deferred until the Stop sheet finishes dismissing, so the detail editor doesn't
     /// try to present while another sheet is still on screen.
     @State private var pendingConvert: ConvertRequest?
+    /// Whether the server has activities; watched so the first sync that finds them offers them.
+    @AppStorage(ActivitiesCapability.supportedKey, store: SharedDefaults.suite) private var activitiesSupported = false
 
     // MARK: Support nudge state
     //
@@ -184,6 +186,7 @@ struct DashboardView: View {
             }) {
                 AllActivitiesSheet(
                     showsSickMode: sickModeStart == nil,
+                    showsActivities: activitiesSupported,
                     onPick: { kind in pendingAddKind = kind; showAllActivities = false },
                     onStartSickMode: {
                         sickMode.turnOn(selectedChildID, at: .now, source: .addSheet)
@@ -916,6 +919,8 @@ private struct QuickAddMenu: View {
 private struct AllActivitiesSheet: View {
     @Environment(\.dismiss) private var dismiss
     var showsSickMode: Bool
+    /// Whether the server has activities, which then get their own section below the measurements.
+    var showsActivities = false
     var onPick: (EntityKind) -> Void
     var onStartSickMode: () -> Void
 
@@ -929,6 +934,7 @@ private struct AllActivitiesSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     section("Log", logKinds)
                     section("Measure", measureKinds)
+                    if showsActivities { section("Activities", [.activity]) }
                     if showsSickMode { sickModeRow }
                 }
                 .padding()

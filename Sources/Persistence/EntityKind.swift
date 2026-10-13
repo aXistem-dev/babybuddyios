@@ -18,6 +18,12 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     case temperature
     case bmi
     case medication
+    /// A user-defined activity type ("Bath", "Walk"). Only on servers with activities; see
+    /// `ActivitiesCapability`. Types are data from the server: the app never names any.
+    case activityType
+    /// Something done with a child, of one ``activityType`` (referenced by its id): a single moment,
+    /// or a start and end when the type tracks duration.
+    case activity
 
     var id: String { rawValue }
 
@@ -38,6 +44,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .temperature: return "temperature"
         case .bmi: return "bmi"
         case .medication: return "medication"
+        case .activityType: return "activity-types"
+        case .activity: return "activities"
         }
     }
 
@@ -45,10 +53,13 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     /// and as the `ordering` field on list requests.
     var timeField: String {
         switch self {
-        case .feeding, .sleep, .tummyTime, .pumping, .timer: return "start"
+        case .feeding, .sleep, .tummyTime, .pumping, .timer, .activity: return "start"
         case .change, .note, .temperature, .medication: return "time"
         case .weight, .height, .headCircumference, .bmi: return "date"
         case .child: return "birth_date"
+        // Activity types have no timestamp: `timestamp(from:)` falls back to `.distantPast`, and
+        // ordering by the server's own order keeps the list request valid.
+        case .activityType: return "order"
         }
     }
 
@@ -56,12 +67,13 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     /// "load older" paging). Children and timers are low-volume metadata; the growth
     /// measurements are infrequent *and* the API exposes no range filter for them
     /// (`filterset_fields = ("child", "date")` — exact match only), so all four are always
-    /// pulled in full. The remaining high-volume event kinds are windowed.
+    /// pulled in full. The remaining high-volume event kinds are windowed, activities among them
+    /// (on `start`, like tummy time); activity types are metadata.
     var isWindowed: Bool {
         switch self {
-        case .feeding, .change, .sleep, .tummyTime, .pumping, .note, .temperature, .medication:
+        case .feeding, .change, .sleep, .tummyTime, .pumping, .note, .temperature, .medication, .activity:
             return true
-        case .child, .timer, .weight, .height, .headCircumference, .bmi:
+        case .child, .timer, .weight, .height, .headCircumference, .bmi, .activityType:
             return false
         }
     }
@@ -92,6 +104,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .temperature: return "Temperature"
         case .bmi: return "BMI"
         case .medication: return "Medication"
+        case .activityType: return "Activity Type"
+        case .activity: return "Activity"
         }
     }
 
@@ -111,6 +125,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .temperature: return "thermometer.medium"
         case .bmi: return "chart.bar"
         case .medication: return "pills.fill"
+        case .activityType: return "square.grid.2x2"
+        case .activity: return "sparkles"
         }
     }
 
@@ -124,10 +140,18 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// Kinds shown in the merged activity timeline (excludes Child, which is metadata).
+    /// Kinds shown in the merged activity timeline (excludes Child and Activity Type, which are
+    /// metadata).
     static var timelineKinds: [EntityKind] {
-        [.feeding, .change, .sleep, .tummyTime, .pumping, .note, .temperature,
+        [.feeding, .change, .sleep, .tummyTime, .pumping, .activity, .note, .temperature,
          .medication, .weight, .height, .headCircumference, .bmi]
+    }
+
+    /// The kinds a sync pulls: every kind, less the activity kinds on a server without activities,
+    /// whose routes don't exist there.
+    static var syncedKinds: [EntityKind] {
+        guard !ActivitiesCapability.isSupported else { return allCases }
+        return allCases.filter { $0 != .activityType && $0 != .activity }
     }
 
     // MARK: Payload extraction

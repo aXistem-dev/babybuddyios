@@ -2,8 +2,10 @@ import Foundation
 
 /// Renders a cached ``LocalEntity`` payload into human-readable text for lists and cards.
 enum EntityFormatting {
+    /// The kind's name; for an activity, its type's name ("Bath"), or "Activity" for a type this
+    /// phone hasn't synced.
     static func title(_ entity: LocalEntity) -> String {
-        entity.kind.displayName
+        entity.activityType?.name ?? entity.kind.displayName
     }
 
     static func subtitle(_ entity: LocalEntity) -> String? { subtitle(entity, unit: .current) }
@@ -59,6 +61,18 @@ enum EntityFormatting {
             return [p["name"] as? String, dosage(entity)].compactMap { $0 }.joined(separator: " · ")
         case .child:
             return nil
+        case .activity:
+            // A type without duration is a moment (start and end the same): no "0 min".
+            var parts: [String] = []
+            let dates = entity.startEndDates
+            if let start = dates.start, let end = dates.end, end > start {
+                parts.append(formatInterval(end.timeIntervalSince(start)))
+            }
+            let notes = (p["notes"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !notes.isEmpty { parts.append(notes) }
+            return parts.joined(separator: " · ")
+        case .activityType:
+            return p["name"] as? String
         }
     }
 

@@ -231,8 +231,10 @@ struct TimelineView: View {
     /// only built for the already-narrowed set.
     private var visibleEntities: [LocalEntity] {
         let childName = selectedChildName
+        let showsActivities = ActivitiesCapability.isSupported
         return events.filter {
-            (kindFilter == nil || $0.kind == kindFilter)
+            guard showsActivities || $0.kind != EntityKind.activity else { return false }
+            return (kindFilter == nil || $0.kind == kindFilter)
                 && TimelineFiltering.inDateRange($0.timestamp, from: dateFrom, to: dateTo)
                 && TimelineFiltering.matchesSearch($0, query: searchText, childName: childName)
         }
@@ -384,7 +386,7 @@ struct TimelineRailRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
-            RailNode(kind: entity.kind, connectsDown: connectsDown)
+            RailNode(kind: entity.kind, icon: entity.tileIcon, connectsDown: connectsDown)
             card.padding(.bottom, 9)
         }
         .padding(.horizontal, 16)
@@ -472,12 +474,14 @@ private struct RailNode: View {
     // clipping the glyph at large accessibility text sizes.
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
     let kind: EntityKind
+    /// An activity type's icon, drawn instead of the glyph.
+    var icon: ActivityIcon? = nil
     let connectsDown: Bool
 
     private var columnWidth: CGFloat { 40 * min(typeScale, 1.6) }
 
     var body: some View {
-        ActivityTile(kind: kind, size: 38, glyph: 20)
+        ActivityTile(kind: kind, size: 38, glyph: 20, icon: icon)
             .padding(.top, 5)
             .frame(width: columnWidth, alignment: .top)
             .frame(maxHeight: .infinity, alignment: .top)
@@ -502,6 +506,12 @@ private struct TimelineFiltersView: View {
 
     private var hasActiveFilters: Bool { kindFilter != nil || dateFrom != nil || dateTo != nil }
 
+    /// The timeline's kinds, less the activity on a server without activities, which has no such
+    /// records to filter to.
+    private var filterKinds: [EntityKind] {
+        EntityKind.timelineKinds.filter { $0 != .activity || ActivitiesCapability.isSupported }
+    }
+
     /// Default seed when a date bound is first enabled: 30 days back for "from", today for "to".
     private var defaultFrom: Date {
         Calendar.current.date(byAdding: .day, value: -30, to: Calendar.current.startOfDay(for: .now)) ?? .now
@@ -513,7 +523,7 @@ private struct TimelineFiltersView: View {
                 Section("Activity Type") {
                     Picker("Type", selection: $kindFilter) {
                         Text("All Types").tag(EntityKind?.none)
-                        ForEach(EntityKind.timelineKinds) { kind in
+                        ForEach(filterKinds) { kind in
                             Text(kind.displayName).tag(EntityKind?.some(kind))
                         }
                     }
