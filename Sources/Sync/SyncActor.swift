@@ -39,9 +39,10 @@ actor SyncActor {
             Analytics.error(network: "pull-unknown")
             return PullOutcome(error: error.localizedDescription, changed: changed)
         }
+        if await refreshActivities(client: client) { changed = true }
         var serverError: APIError?   // last 5xx seen; surfaced only if *every* kind fails this way
         var pulledAnyKind = false
-        for kind in EntityKind.allCases {
+        for kind in EntityKind.syncedKinds {
             do {
                 try await pull(kind: kind, client: client, windowDays: windowDays)
                 // Save only when the pull actually changed something: an unchanged kind's save
@@ -79,7 +80,37 @@ actor SyncActor {
         if !pulledAnyKind, let serverError {
             return Self.fail(serverError, endpoint: "all", changed: changed)
         }
+        if cacheActivityTypes() { changed = true }
         return PullOutcome(error: nil, changed: changed)
+    }
+
+    /// Refresh whether the server has activities (its API root lists the activity routes), before
+    /// the kinds are pulled, so a server without them isn't asked for routes it doesn't have. Never
+    /// fails the sync: a network or HTTP error keeps what was known. Returns whether it changed, so
+    /// the pull counts as a change and what shows activities refreshes.
+    private func refreshActivities(client: APIClient) async -> Bool {
+        let hadActivities = ActivitiesCapability.isSupported
+        do {
+            ActivitiesCapability.update(rootJSON: try await client.getRawPath(""))
+        } catch let error as APIError {
+            Analytics.report(error, context: "pull-activities")
+        } catch {
+            Analytics.error(network: "pull-activities")
+        }
+        return ActivitiesCapability.isSupported != hadActivities
+    }
+
+    /// Cache the pulled activity types for the rows that show an activity (see
+    /// ``ActivitiesCapability``). Returns whether they changed, so a rename shows without new
+    /// activities.
+    private func cacheActivityTypes() -> Bool {
+        guard ActivitiesCapability.isSupported else { return false }
+        let before = ActivitiesCapability.types
+        let kind = EntityKind.activityType.rawValue
+        let types = (try? modelContext.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        ActivitiesCapability.store(typesIn: types)
+        return ActivitiesCapability.types != before
     }
 
     /// Report a pull failure and turn it into the outcome the caller surfaces. `endpoint` is the
@@ -142,7 +173,7 @@ actor SyncActor {
         let client = APIClient(config: config)
         var serverError: String?     // last 5xx seen; surfaced only if *every* kind fails this way
         var pulledAnyKind = false
-        for kind in EntityKind.allCases where kind.isWindowed {
+        for kind in EntityKind.syncedKinds where kind.isWindowed {
             do {
                 var query = ListQuery(ordering: "-\(kind.timeField)")
                 query.timeParam = kind.rangeFilterParam

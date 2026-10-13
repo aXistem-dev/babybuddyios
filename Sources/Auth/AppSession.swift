@@ -199,6 +199,8 @@ final class AppSession {
 
     /// Erase the cached server data and refresh the widgets, which read the same store.
     private func clearLocalData() {
+        // Whether the server has activities, and its activity types, belong to the server being left.
+        ActivitiesCapability.reset()
         guard let context else { return }
         LocalStore.wipe(in: context)
         WidgetCenter.shared.reloadAllTimelines()
