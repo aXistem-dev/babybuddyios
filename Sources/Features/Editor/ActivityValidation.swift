@@ -5,6 +5,7 @@ import Foundation
 /// family data (no dates, durations, amounts, or child ids).
 enum ActivityProblem: Equatable {
     case amountRequired
+    case stashAmountRequired
     case valueRequired
     case notANumber
     case noteRequired
@@ -18,6 +19,7 @@ enum ActivityProblem: Equatable {
     var message: String {
         switch self {
         case .amountRequired:        return "Enter how much was pumped — Baby Buddy needs an amount."
+        case .stashAmountRequired:   return "Enter how much milk — more than zero."
         case .valueRequired:         return "Enter a value."
         case .notANumber:            return "That isn't a number Baby Buddy can read. Use digits, like 90 or 4.5."
         case .noteRequired:          return "Write something for this note."
@@ -77,6 +79,12 @@ struct ActivityDraft {
         case .medication:
             if medName.trimmingCharacters(in: .whitespaces).isEmpty { return .medicationNameRequired }
             if !dosage.trimmingCharacters(in: .whitespaces).isEmpty, Self.number(dosage) == nil { return .notANumber }
+            return isFuture(time) ? .futureTimestamp : nil
+        case .stashAdjustment:
+            guard let parsed = Self.number(amount), parsed > 0 else {
+                return amount.trimmingCharacters(in: .whitespaces).isEmpty || Self.number(amount) != nil
+                    ? .stashAmountRequired : .notANumber
+            }
             return isFuture(time) ? .futureTimestamp : nil
         case .timer, .child:
             return nil // not editable in this form

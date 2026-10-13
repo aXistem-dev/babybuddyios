@@ -43,6 +43,10 @@ struct SettingsView: View {
     @AppStorage(ForgottenTimerPolicy.enabledKey, store: SharedDefaults.suite) private var timerAlertsEnabled = false
     // Mirrors MedicationReminderPolicy.isEnabled.
     @AppStorage(MedicationReminderPolicy.enabledKey, store: SharedDefaults.suite) private var doseRemindersEnabled = false
+    // Mirrors StashAgePolicy.isEnabled, on by default.
+    @AppStorage(StashAgePolicy.enabledKey, store: SharedDefaults.suite)
+    private var stashAlertsEnabled = StashAgePolicy.defaultOn
+    @AppStorage(StashCapability.supportedKey, store: SharedDefaults.suite) private var stashSupported = false
     @AppStorage(UndoToastCenter.enabledKey) private var undoToastEnabled = true
     // Sick mode (see ``SickMode``): the keys and defaults are the ones it reads.
     @State private var sickMode = SickModeStore.shared
@@ -591,6 +595,14 @@ struct SettingsView: View {
 
             SettingsRow(symbol: "pills.fill", tint: BBColor.activity(.medication), title: "Medication reminders") {
                 Self.alertToggle("Medication reminders", $doseRemindersEnabled, setting: "medicationReminders")
+            }
+
+            if stashSupported {
+                rowDivider
+
+                SettingsRow(symbol: "refrigerator", tint: BBColor.pumping, title: "Milk stash expiry") {
+                    Self.alertToggle("Milk stash expiry", $stashAlertsEnabled, setting: "stashAgeAlerts")
+                }
             }
         }
     }
