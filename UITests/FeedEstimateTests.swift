@@ -1,6 +1,6 @@
 import XCTest
 
-/// The next-feed estimate (#74), on a demo whose feeds come every 3 hours around the clock
+/// The next-feed estimate, on a demo whose feeds come every 3 hours around the clock
 /// (`BB_SEED_STEADY_FEEDS=1`), so it shows whatever time of day the test runs.
 final class FeedEstimateTests: UITestCase {
     /// Off by default: Home shows no estimate, even with a steady pattern to estimate from.
