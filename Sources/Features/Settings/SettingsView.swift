@@ -27,6 +27,9 @@ struct SettingsView: View {
 
     // Shared with the Dashboard/Timeline tabs and the widget, so "Switch" here moves them too.
     @AppStorage("selectedChildID", store: SharedDefaults.suite) private var selectedChildID = 0
+    /// What the server lets this user do with activity types; watched so a sync that allows it shows
+    /// Activity types.
+    @AppStorage(ActivitiesCapability.permissionsKey, store: SharedDefaults.suite) private var activityPermissionsData: Data?
     // Mirrors SharedDefaults.liveActivitiesEnabled; keep the key and default in sync.
     @AppStorage("liveActivitiesEnabled", store: SharedDefaults.suite) private var liveActivitiesEnabled = true
     @AppStorage(SharedDefaults.stalenessThresholdKey, store: SharedDefaults.suite)
@@ -106,6 +109,22 @@ struct SettingsView: View {
                     }
 
                     sectioned("Sick mode") { sickModeCard }
+
+                    if showsActivityTypes {
+                        sectioned("Activities") {
+                            card {
+                                NavigationLink { ActivityTypesView() } label: {
+                                    SettingsRow(symbol: "square.grid.2x2.fill", tint: BBColor.customActivity,
+                                                title: "Activity types",
+                                                subtitle: "Add, change or delete the activities you log.") {
+                                        Image(systemName: "chevron.right")
+                                            .font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
 
                     sectioned("Notifications") {
                         notificationsCard
@@ -566,6 +585,12 @@ struct SettingsView: View {
                 Self.alertToggle("Medication reminders", $doseRemindersEnabled, setting: "medicationReminders")
             }
         }
+    }
+
+    /// Activity types, on a server with activities, for a user it lets add, change or delete them.
+    private var showsActivityTypes: Bool {
+        _ = activityPermissionsData
+        return ActivitiesCapability.isSupported && ActivitiesCapability.permissions.any
     }
 
     /// A notifications switch: turning it on asks for permission, and either way the scheduled
