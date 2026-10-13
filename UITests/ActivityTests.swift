@@ -259,4 +259,42 @@ final class ActivityTests: UITestCase {
         expect(app.navigationBars["New Activity"])
         XCTAssertFalse(app.buttons["Manage activity types"].exists)
     }
+
+    // MARK: Timers
+
+    /// A type with duration can be timed like tummy time: the Start Timer sheet offers it (and not a
+    /// type without duration), the running timer is named after it, and Stop logs it in one tap.
+    func testTimeAnActivity() {
+        launch(["BB_TOAST_SECONDS": "30"])
+        tap(app.buttons["Stop"])
+        tap(app.buttons["Discard timer"]) // the seeded timer, so one Stop button below
+
+        tap(app.buttons["Add"])
+        tap(app.buttons["Start timer"])
+        let startSheet = expect(app.navigationBars["Start Timer"])
+        expect(app.staticTexts["ACTIVITIES"])
+        XCTAssertFalse(app.buttons["Bath"].exists, "A moment can't be timed")
+        tap(app.buttons["Walk"])
+        tap(app.buttons["Start walk timer"])
+        expectGone(startSheet)
+        expect(element(labeled: "Walk running"))
+
+        tap(app.buttons["Stop"])
+        expect(app.navigationBars["Stop Timer"])
+        tap(app.buttons["Log walk"]) // preselected: the timer remembers its type
+        expect(element(labeled: "Logged walk"))
+        expect(app.buttons.labeled("Start a timer"))
+    }
+
+    /// The editor's "Start timer instead" times a type with duration from the form's start.
+    func testStartTimerInsteadFromEditor() {
+        launch()
+        openActivityEditor()
+        tap(app.buttons["Bath"])
+        XCTAssertFalse(app.buttons["Start timer instead"].exists, "A moment can't be timed")
+        tap(app.buttons["Walk"])
+        tap(app.buttons["Start timer instead"])
+        expectGone(app.navigationBars["New Activity"])
+        expect(element(labeled: "Walk running"))
+    }
 }

@@ -174,6 +174,18 @@ struct LocalRepository {
         return activity
     }
 
+    /// Start a timer for an activity type with duration, remembering the type (locally, like a
+    /// kind's) so stopping it files straight to that type.
+    @discardableResult
+    func startActivityTimer(_ type: ActivitiesCapability.TypeInfo, child: Int, start: Date, name: String) -> LocalEntity? {
+        let timer = create(kind: .timer, payload: [
+            "child": child, "start": APIDate.isoDateTime.string(from: start), "name": name,
+        ])
+        timer?.timerActivityRaw = ActivitiesCapability.timerActivityRaw(typeID: type.id)
+        try? context.save()
+        return timer
+    }
+
     /// Discard a stopped timer without logging anything. Its DELETE, if still queued, stays.
     func discardStoppedTimer(_ timer: LocalEntity) {
         guard timer.stoppedAt != nil else { return delete(timer) }
