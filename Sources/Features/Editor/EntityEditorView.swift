@@ -24,6 +24,8 @@ struct EntityEditorView: View {
     let template: LocalEntity?
     /// Where a new record's `Activity.logged` says it came from.
     let source: Analytics.ActivitySource
+    /// The activity type (by id) a new activity starts on; none, and the customer picks one.
+    let activityTypePreset: Int?
 
     /// The record kind. Mirrored into state so the top activity selector can swap it while
     /// creating; locked to the passed-in value when editing or converting.
@@ -36,12 +38,14 @@ struct EntityEditorView: View {
     private var children: [LocalEntity]
 
     init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil,
-         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor) {
+         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor,
+         activityTypePreset: Int? = nil) {
         self.childID = childID
         self.entity = entity
         self.sourceTimer = sourceTimer
         self.template = template
         self.source = source
+        self.activityTypePreset = activityTypePreset
         _kind = State(initialValue: kind)
         _selectedChildID = State(initialValue: childID)
     }
@@ -914,6 +918,7 @@ struct EntityEditorView: View {
     // MARK: Load / save
 
     private func populate() {
+        if entity == nil, let activityTypePreset { activityType = activityTypePreset }
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
             if let s = timer.payloadObject["start"] as? String, let d = APIDate.parse(s) { start = d }
