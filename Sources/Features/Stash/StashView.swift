@@ -7,6 +7,7 @@ import SwiftData
 /// Activity sheet and `babybuddy://stash`.
 struct StashView: View {
     @Environment(SyncEngine.self) private var sync
+    @Environment(\.modelContext) private var context
     /// The child the stash was opened from; the editor needs one, though stash entries have none.
     let childID: Int
 
@@ -14,18 +15,20 @@ struct StashView: View {
     /// Milk stash entries the server doesn't have yet. Until it does, its figures leave them out, so
     /// "Throw away expired milk" waits: a second tap would throw away fresh milk too.
     @Query private var queued: [LocalEntity]
-    /// The records the milk came from, so a lot can open its own.
+    /// The records milk came from or went to: lots open their own, and the history lists them.
     @Query private var sources: [LocalEntity]
     @State private var newEntry: NewStashEntry?
     @State private var editing: LocalEntity?
+    @State private var deleting: LocalEntity?
 
     init(childID: Int) {
         self.childID = childID
         let kind = EntityKind.stashAdjustment.rawValue
         let pumping = EntityKind.pumping.rawValue
+        let feeding = EntityKind.feeding.rawValue
         let synced = SyncState.synced.rawValue
         _queued = Query(filter: #Predicate { $0.kindRaw == kind && $0.syncStateRaw != synced })
-        _sources = Query(filter: #Predicate { $0.kindRaw == kind || $0.kindRaw == pumping })
+        _sources = Query(filter: #Predicate { $0.kindRaw == kind || $0.kindRaw == pumping || $0.kindRaw == feeding })
     }
 
     var body: some View {
@@ -35,6 +38,7 @@ struct StashView: View {
             VStack(alignment: .leading, spacing: 18) {
                 balanceCard(summary, now: now)
                 if let summary { lotsSection(summary, now: now) }
+                historySection
             }
             .padding(.horizontal)
             .padding(.top, 8)
@@ -49,6 +53,12 @@ struct StashView: View {
         }
         .sheet(item: $editing) { entity in
             EntityEditorView(kind: entity.kind, childID: entity.childID ?? childID, entity: entity)
+        }
+        // `.alert`, not `confirmationDialog`: iOS 26 drops the cancel action of a dialog shown as a popover.
+        .alert("Delete this milk stash entry?",
+               isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+            Button("Delete", role: .destructive) { deleteEntry() }
+            Button("Cancel", role: .cancel) { deleting = nil }
         }
     }
 
@@ -117,6 +127,63 @@ struct StashView: View {
                 }
             }
         }
+    }
+
+    /// The last movements in and out, from the records this phone has synced. Each opens its record;
+    /// milk added or discarded by hand can also be deleted here, from its context menu.
+    @ViewBuilder private var historySection: some View {
+        let movements = StashHistory.movements(in: sources)
+        if !movements.isEmpty {
+            VStack(alignment: .leading, spacing: 9) {
+                SectionHeader("History")
+                BBCard(cornerRadius: BBRadius.tile, padding: 0) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(movements.enumerated()), id: \.element.id) { index, movement in
+                            if index > 0 { Rectangle().fill(BBColor.divider).frame(height: 0.5).padding(.leading, 15) }
+                            historyRow(movement)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func historyRow(_ movement: StashHistory.Movement) -> some View {
+        let when = movement.time.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+        let row = Button { editing = movement.record } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(movement.kind.label).font(.subheadline.weight(.semibold))
+                    Text(when).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                SyncStateBadge(state: movement.record.syncState).font(.caption2)
+                Text(movement.signedAmount)
+                    .font(.subheadline.weight(.semibold)).monospacedDigit()
+                    .foregroundStyle(movement.isIn ? BBColor.successAccent : Color.primary)
+            }
+            .padding(.horizontal, 15)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(movement.kind.label), \(movement.signedAmount), \(when)")
+        if movement.isDeletableHere {
+            row.contextMenu {
+                Button(role: .destructive) { deleting = movement.record } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
+        } else {
+            row
+        }
+    }
+
+    private func deleteEntry() {
+        guard let entry = deleting else { return }
+        deleting = nil
+        LocalRepository(context: context).delete(entry)
+        Task { await sync.sync() }
     }
 
     /// A lot, which opens the record it came from when this phone has it.
