@@ -171,13 +171,15 @@ final class ActivitiesTests: XCTestCase {
         XCTAssertEqual(ActivityIcon(icon: "not-a-server-icon", emoji: ""), .symbol(EntityKind.activity.systemImage))
     }
 
-    /// Every icon the server offers (`ACTIVITY_ICONS`) has its own image, except the default.
+    /// Every icon the server offers (`ACTIVITY_ICONS`) has its own image, except the default, and the
+    /// type form offers exactly those, in the server's order.
     func testEveryServerIconIsMapped() {
         let server = ["activities", "bmi", "calendar", "camera", "chat", "child", "clock", "dashboard",
                       "diaperchange", "feeding", "graph", "head-circumference", "height", "list", "lock",
                       "mail", "measurements", "medication", "note", "pumping", "refresh", "sad", "sleep",
                       "source", "stop", "tag", "temperature", "timeline", "timer", "today", "tummytime",
                       "user", "weight"]
+        XCTAssertEqual(ActivityIcon.serverIcons.map(\.name), server)
         let mapped = Set(ActivityIcon.glyphs.keys).union(ActivityIcon.symbols.keys)
         XCTAssertEqual(Set(server).subtracting(mapped), ["activities"])
         XCTAssertTrue(mapped.isSubset(of: server))
@@ -250,5 +252,81 @@ final class ActivitiesTests: XCTestCase {
                        "Walk twice, then the newer of the two used once, then the unused; never the inactive")
         XCTAssertEqual(ActivityUsage.topTypes(activities: activities, types: types, child: 1, now: now, limit: 2)
             .map(\.name), ["Walk", "Pajama change"])
+    }
+
+    // MARK: Managing types
+
+    /// The type list's `permissions` say what this user may do; missing ones read as false. A server
+    /// without activities, and sign-out, forget them.
+    func testPermissions() {
+        let page = Data(#"""
+        {"count": 0, "next": null, "previous": null, "results": [],
+         "permissions": {"add": true, "change": true, "delete": false, "delete_with_activities": true}}
+        """#.utf8)
+        let p = ActivitiesCapability.permissions(fromListJSON: page)
+        XCTAssertEqual(p, .init(add: true, change: true, delete: false, deleteWithActivities: true))
+        XCTAssertTrue(p.any)
+        XCTAssertEqual(ActivitiesCapability.permissions(fromListJSON: Data(#"{"results": []}"#.utf8)), .init())
+        XCTAssertFalse(ActivitiesCapability.Permissions().any)
+        XCTAssertEqual(ActivitiesCapability.typeListPath, "activity-types/")
+
+        supportActivities()
+        ActivitiesCapability.store(permissions: p)
+        XCTAssertEqual(ActivitiesCapability.permissions, p)
+        ActivitiesCapability.update(rootJSON: Data(#"{"children": "x"}"#.utf8))
+        XCTAssertEqual(ActivitiesCapability.permissions, .init())
+        ActivitiesCapability.store(permissions: p)
+        ActivitiesCapability.reset()
+        XCTAssertEqual(ActivitiesCapability.permissions, .init())
+    }
+
+    /// A name is required and at most 100 characters; an emoji is one character or none. A new type
+    /// sends every field; an edit only what changed, trimmed.
+    func testTypeFields() {
+        var fields = ActivityTypeFields()
+        XCTAssertEqual(fields.nameProblem, "Enter a name.")
+        fields.name = String(repeating: "a", count: 101)
+        XCTAssertNotNil(fields.nameProblem)
+        fields.name = " Walk "
+        XCTAssertNil(fields.nameProblem)
+        fields.emoji = "🚶🚶"
+        XCTAssertFalse(fields.isValid)
+        fields.emoji = "👍🏽"
+        XCTAssertTrue(fields.isValid, "A skin tone is part of one emoji")
+        fields.hasDuration = true
+
+        let body = fields.body
+        XCTAssertEqual(body["name"] as? String, "Walk")
+        XCTAssertEqual(body["icon"] as? String, "activities")
+        XCTAssertEqual(body["has_duration"] as? Bool, true)
+        XCTAssertEqual(body["active"] as? Bool, true)
+
+        let current: [String: Any] = ["id": 4, "name": "Walk", "slug": "walk", "icon": "activities",
+                                      "emoji": "🚶", "has_duration": true, "active": true, "order": 4]
+        var edit = ActivityTypeFields(payload: current)
+        XCTAssertTrue(edit.changes(from: current).isEmpty)
+        edit.name = "Stroll "
+        edit.active = false
+        edit.icon = "sleep"
+        let changes = edit.changes(from: current)
+        XCTAssertEqual(Set(changes.keys), ["name", "active", "icon"])
+        XCTAssertEqual(changes["name"] as? String, "Stroll")
+        XCTAssertEqual(changes["active"] as? Bool, false)
+    }
+
+    /// A refused delete offers deleting the activities too only when the server counted some and lets
+    /// this user delete them; the question counts them.
+    func testDeleteCascade() {
+        let conflict = DeleteConflict(from: Data(#"{"detail": "In use.", "activity_count": 3}"#.utf8))
+        XCTAssertEqual(conflict, DeleteConflict(message: "In use.", activityCount: 3))
+        let may = ActivitiesCapability.Permissions(delete: true, deleteWithActivities: true)
+        XCTAssertTrue(ActivityTypeFields.offersCascade(conflict, permissions: may))
+        XCTAssertFalse(ActivityTypeFields.offersCascade(conflict, permissions: .init(delete: true)))
+        XCTAssertFalse(ActivityTypeFields.offersCascade(DeleteConflict(message: nil, activityCount: nil),
+                                                        permissions: may))
+        XCTAssertEqual(ActivityTypeFields.cascadeTitle(name: "Bath", activityCount: 1),
+                       "Delete \u{201C}Bath\u{201D} and its 1 activity?")
+        XCTAssertEqual(ActivityTypeFields.cascadeTitle(name: "Bath", activityCount: 2),
+                       "Delete \u{201C}Bath\u{201D} and its 2 activities?")
     }
 }

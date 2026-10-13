@@ -589,6 +589,11 @@ private struct TimelineFiltersView: View {
                         }
                     }
                 }
+                if kindFilter == .activity, ActivitiesCapability.permissions.any {
+                    Section {
+                        NavigationLink("Manage activity types") { ActivityTypesView() }
+                    }
+                }
                 Section("Date Range") {
                     dateBound(label: "From", date: $dateFrom, default: defaultFrom)
                     dateBound(label: "To", date: $dateTo, default: Calendar.current.startOfDay(for: .now))

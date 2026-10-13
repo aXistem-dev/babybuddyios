@@ -9,6 +9,8 @@ enum ActivitiesCapability {
     static let supportedKey = "activitiesSupported"
     /// Public so views can watch the cached types with `@AppStorage` and redraw on a rename.
     static let typesKey = "activityTypes"
+    /// Public so Settings can watch it with `@AppStorage` and show Activity types once a sync allows it.
+    static let permissionsKey = "activityTypePermissions"
 
     /// The API root keys a server with activities lists.
     static let rootKeys = ["activity-types", "activities"]
@@ -22,11 +24,14 @@ enum ActivitiesCapability {
     }
 
     /// Set the flag from the `GET /api/` root response. A server without activities also drops the
-    /// cached types.
+    /// cached types and permissions.
     static func update(rootJSON: Data) {
         let supported = listsActivities(rootJSON: rootJSON)
         SharedDefaults.suite.set(supported, forKey: supportedKey)
-        if !supported { SharedDefaults.suite.removeObject(forKey: typesKey) }
+        if !supported {
+            SharedDefaults.suite.removeObject(forKey: typesKey)
+            SharedDefaults.suite.removeObject(forKey: permissionsKey)
+        }
     }
 
     /// What a row needs to know about an activity type.
@@ -89,10 +94,53 @@ enum ActivitiesCapability {
         }
     }
 
+    // MARK: Permissions
+
+    /// What the signed-in user may do with activity types, as the server says on its type list. The
+    /// app never works this out itself.
+    struct Permissions: Codable, Equatable {
+        var add = false
+        var change = false
+        var delete = false
+        /// May delete a type together with its activities.
+        var deleteWithActivities = false
+
+        /// Whether there's anything to manage at all.
+        var any: Bool { add || change || delete }
+    }
+
+    /// The last permissions the server sent; all false until then.
+    static var permissions: Permissions {
+        guard let data = SharedDefaults.suite.data(forKey: permissionsKey),
+              let p = try? JSONDecoder().decode(Permissions.self, from: data) else { return Permissions() }
+        return p
+    }
+
+    static func store(permissions: Permissions) {
+        if let data = try? JSONEncoder().encode(permissions) {
+            SharedDefaults.suite.set(data, forKey: permissionsKey)
+        }
+    }
+
+    /// The type list's route, with the trailing slash the server's router expects. Without it the
+    /// server redirects, and the redirect drops the token, so the request is refused.
+    static let typeListPath = EntityKind.activityType.path + "/"
+
+    /// The `permissions` object of a `GET /api/activity-types/` page (the same on every page); all
+    /// false when it's missing or unreadable.
+    static func permissions(fromListJSON data: Data) -> Permissions {
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let p = root["permissions"] as? [String: Any] else { return Permissions() }
+        return Permissions(add: p["add"] as? Bool ?? false, change: p["change"] as? Bool ?? false,
+                           delete: p["delete"] as? Bool ?? false,
+                           deleteWithActivities: p["delete_with_activities"] as? Bool ?? false)
+    }
+
     /// Forget all of it, e.g. on sign-out, so the next server starts from "no activities".
     static func reset() {
         SharedDefaults.suite.removeObject(forKey: supportedKey)
         SharedDefaults.suite.removeObject(forKey: typesKey)
+        SharedDefaults.suite.removeObject(forKey: permissionsKey)
     }
 }
 
@@ -102,6 +150,19 @@ enum ActivityIcon: Equatable {
     case emoji(String)
     case glyph(EntityKind)
     case symbol(String)
+
+    /// The server's icon names (`ACTIVITY_ICONS`), in its order, with their titles.
+    static let serverIcons: [(name: String, title: String)] = [
+        ("activities", "Activities"), ("bmi", "BMI"), ("calendar", "Calendar"), ("camera", "Camera"),
+        ("chat", "Chat"), ("child", "Child"), ("clock", "Clock"), ("dashboard", "Dashboard"),
+        ("diaperchange", "Diaper Change"), ("feeding", "Feeding"), ("graph", "Graph"),
+        ("head-circumference", "Head Circumference"), ("height", "Height"), ("list", "List"),
+        ("lock", "Lock"), ("mail", "Mail"), ("measurements", "Measurements"), ("medication", "Medication"),
+        ("note", "Note"), ("pumping", "Pumping"), ("refresh", "Refresh"), ("sad", "Sad"), ("sleep", "Sleep"),
+        ("source", "Source"), ("stop", "Stop"), ("tag", "Tag"), ("temperature", "Temperature"),
+        ("timeline", "Timeline"), ("timer", "Timer"), ("today", "Today"), ("tummytime", "Tummy Time"),
+        ("user", "User"), ("weight", "Weight"),
+    ]
 
     init(icon: String, emoji: String) {
         if !emoji.isEmpty {

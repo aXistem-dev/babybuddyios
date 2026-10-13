@@ -80,7 +80,7 @@ actor SyncActor {
         if !pulledAnyKind, let serverError {
             return Self.fail(serverError, endpoint: "all", changed: changed)
         }
-        if cacheActivityTypes() { changed = true }
+        if await refreshActivityTypes(client: client) { changed = true }
         return PullOutcome(error: nil, changed: changed)
     }
 
@@ -100,17 +100,22 @@ actor SyncActor {
         return ActivitiesCapability.isSupported != hadActivities
     }
 
-    /// Cache the pulled activity types for the rows that show an activity (see
-    /// ``ActivitiesCapability``). Returns whether they changed, so a rename shows without new
-    /// activities.
-    private func cacheActivityTypes() -> Bool {
+    /// Cache the pulled activity types for the rows that show an activity, and what this user may do
+    /// with them (the `permissions` of the type list's first page). See ``ActivitiesCapability``.
+    /// Returns whether any of it changed, so a rename shows without new activities.
+    private func refreshActivityTypes(client: APIClient) async -> Bool {
         guard ActivitiesCapability.isSupported else { return false }
         let before = ActivitiesCapability.types
+        let permissions = ActivitiesCapability.permissions
         let kind = EntityKind.activityType.rawValue
         let types = (try? modelContext.fetch(FetchDescriptor<LocalEntity>(
             predicate: #Predicate { $0.kindRaw == kind }))) ?? []
         ActivitiesCapability.store(typesIn: types)
-        return ActivitiesCapability.types != before
+        // A failed request keeps the permissions this phone last had.
+        if let page = try? await client.getRawPath(ActivitiesCapability.typeListPath) {
+            ActivitiesCapability.store(permissions: ActivitiesCapability.permissions(fromListJSON: page))
+        }
+        return ActivitiesCapability.types != before || ActivitiesCapability.permissions != permissions
     }
 
     /// Report a pull failure and turn it into the outcome the caller surfaces. `endpoint` is the
