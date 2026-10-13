@@ -14,13 +14,18 @@ struct StashView: View {
     /// Milk stash entries the server doesn't have yet. Until it does, its figures leave them out, so
     /// "Throw away expired milk" waits: a second tap would throw away fresh milk too.
     @Query private var queued: [LocalEntity]
+    /// The records the milk came from, so a lot can open its own.
+    @Query private var sources: [LocalEntity]
     @State private var newEntry: NewStashEntry?
+    @State private var editing: LocalEntity?
 
     init(childID: Int) {
         self.childID = childID
         let kind = EntityKind.stashAdjustment.rawValue
+        let pumping = EntityKind.pumping.rawValue
         let synced = SyncState.synced.rawValue
         _queued = Query(filter: #Predicate { $0.kindRaw == kind && $0.syncStateRaw != synced })
+        _sources = Query(filter: #Predicate { $0.kindRaw == kind || $0.kindRaw == pumping })
     }
 
     var body: some View {
@@ -41,6 +46,9 @@ struct StashView: View {
         .refreshable { await sync.sync() }
         .sheet(item: $newEntry) { entry in
             EntityEditorView(kind: .stashAdjustment, childID: childID, stashKind: entry.kind, amount: entry.amount)
+        }
+        .sheet(item: $editing) { entity in
+            EntityEditorView(kind: entity.kind, childID: entity.childID ?? childID, entity: entity)
         }
     }
 
@@ -111,23 +119,40 @@ struct StashView: View {
         }
     }
 
-    private func lotRow(_ lot: StashLotDTO, now: Date) -> some View {
+    /// A lot, which opens the record it came from when this phone has it.
+    @ViewBuilder private func lotRow(_ lot: StashLotDTO, now: Date) -> some View {
         let amount = EntityFormatting.formatAmount(lot.amount)
         let format = Date.FormatStyle.dateTime.weekday(.abbreviated).hour().minute()
         let detail = "Stored \(lot.time.formatted(format)) · expires \(lot.expires_at.formatted(format))"
         let status = lot.status(at: now)
-        return HStack(spacing: 12) {
+        let label = "\(amount), \(detail), \(status.label)"
+        if let record = StashHistory.record(for: lot.source, in: sources) {
+            Button { editing = record } label: { lotContent(amount, detail, status, opens: true) }
+                .buttonStyle(.plain)
+                .accessibilityLabel(label)
+                .accessibilityHint("Opens the \(record.kind.displayName.lowercased()) it came from")
+        } else {
+            lotContent(amount, detail, status, opens: false)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(label)
+        }
+    }
+
+    private func lotContent(_ amount: String, _ detail: String, _ status: StashStatus, opens: Bool) -> some View {
+        HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(amount).font(.subheadline.weight(.semibold)).monospacedDigit()
                 Text(detail).font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             StashStatusChip(status: status)
+            if opens {
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+            }
         }
         .padding(.horizontal, 15)
         .padding(.vertical, 11)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(amount), \(detail), \(status.label)")
+        .contentShape(Rectangle())
     }
 }
 

@@ -257,12 +257,22 @@ struct StashLotDTO: Codable, Equatable {
     var expires_at: Date
     /// The server's status when the summary was made; ``status(at:)`` is current.
     var status: StashStatus
+    /// The movement in that this lot is what's left of; absent on a server from before it.
+    var source: StashLotSourceDTO? = nil
 
     func status(at now: Date) -> StashStatus {
         if now >= expires_at { return .expired }
         if now >= warn_at { return .warn }
         return .ok
     }
+}
+
+/// Where a lot of milk came from: a pumping into the stash, or milk added by hand.
+struct StashLotSourceDTO: Codable, Equatable {
+    /// `pumping` or `stash_adjustment`.
+    var type: String
+    /// That record's id in `/api/pumping/` or `/api/stash-adjustments/`.
+    var id: Int
 }
 
 /// The milk stash (`GET /api/stash`). The server works it out over the whole history, which the app
