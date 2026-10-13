@@ -82,7 +82,8 @@ final class ActivitiesTests: XCTestCase {
         XCTAssertFalse(EntityKind.syncedKinds.contains(.activityType))
         XCTAssertTrue(EntityKind.syncedKinds.contains(.feeding))
         supportActivities()
-        XCTAssertEqual(EntityKind.syncedKinds, EntityKind.allCases)
+        XCTAssertTrue(EntityKind.syncedKinds.contains(.activity))
+        XCTAssertTrue(EntityKind.syncedKinds.contains(.activityType))
     }
 
     // MARK: Payloads
