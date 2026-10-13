@@ -383,8 +383,9 @@ enum DemoData {
     }
 
     /// The records the demo lots came from: milk added by hand 75 hours ago, and a pumping into the
-    /// stash that ended 50 hours ago (more than its lot holds now). The 6-hour lot names no source,
-    /// as a server from before lot sources sends none. ids 7000+.
+    /// stash that ended 50 hours ago (more than its lot holds now: a bottle from the stash 20 hours
+    /// ago took some). The 6-hour lot names no source, as a server from before lot sources sends
+    /// none. ids 7000+.
     @MainActor
     private static func seedStashSources(into context: ModelContext) {
         let now = Date()
@@ -397,6 +398,10 @@ enum DemoData {
         insert(.pumping, id: 7001, [
             "id": 7001, "child": 1, "start": iso(50.33), "end": iso(50), "amount": 160.0, "to_stash": true,
             "notes": "", "tags": [],
+        ], context)
+        insert(.feeding, id: 7002, [
+            "id": 7002, "child": 1, "start": iso(20), "end": iso(19.83), "type": "breast milk",
+            "method": "bottle", "amount": 40.0, "from_stash": true, "notes": "", "tags": [],
         ], context)
     }
 
