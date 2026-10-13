@@ -147,4 +147,116 @@ final class ActivityTests: UITestCase {
         expect(element(labeled: "Feeding, "))
         XCTAssertFalse(element(labeled: "Bodysuit change, ").exists)
     }
+
+    // MARK: Managing activity types
+
+    /// Settings ▸ Activity types, for a user the server lets manage them: add a type that tracks
+    /// duration, and it's offered in the editor with a start and an end; rename it, and its slug stays.
+    func testAddAndRenameType() {
+        launch(["BB_START_TAB": "settings"])
+        tap(app.buttons.labeled("Activity types"))
+        expect(app.navigationBars["Activity types"])
+        expect(app.buttons.labeled("Walk"))
+
+        tap(app.buttons["Add activity type"])
+        let new = expect(app.navigationBars["New activity type"])
+        let name = app.textFields["Name"]
+        tap(name)
+        name.typeText("Stroller walk")
+        toggle(app.switches["Track duration"], to: "1")
+        tap(new.buttons["Save"])
+        expectGone(new)
+        tap(app.buttons.labeled("Stroller walk"))
+
+        let edit = expect(app.navigationBars["Edit activity type"])
+        expect(element(labeled: "The type\u{2019}s key (stroller-walk) stays the same"))
+        replaceText(app.textFields["Name"], with: "Pram walk")
+        tap(edit.buttons["Save"])
+        expectGone(edit)
+        expect(app.buttons.labeled("Pram walk"))
+        XCTAssertFalse(app.buttons.labeled("Stroller walk").exists)
+
+        tap(app.tabBars.buttons["Home"])
+        openActivityEditor()
+        tap(app.buttons["Pram walk"])
+        expect(app.staticTexts["End"])
+    }
+
+    /// Deactivating a type takes it out of the editor; its activities stay on the timeline.
+    func testDeactivateType() {
+        launch(["BB_START_TAB": "settings"])
+        tap(app.buttons.labeled("Activity types"))
+        tap(app.buttons.labeled("Bodysuit change"))
+        let edit = expect(app.navigationBars["Edit activity type"])
+        toggle(app.switches["Active"], to: "0")
+        tap(edit.buttons["Save"])
+        expectGone(edit)
+        expect(app.buttons["Bodysuit change, Inactive"])
+
+        tap(app.tabBars.buttons["Timeline"])
+        expect(element(labeled: "Bodysuit change, "))
+        tap(app.tabBars.buttons["Home"])
+        openActivityEditor()
+        expect(app.buttons["Bath"])
+        XCTAssertFalse(app.buttons["Bodysuit change"].exists)
+    }
+
+    /// Deleting a type that activities use asks first, counting them: Cancel keeps the type; Delete
+    /// removes it and its activities, so Home's Latest row moves on to the next newest activity.
+    func testDeleteTypeWithActivitiesAsksFirst() {
+        launch(["BB_START_TAB": "settings"])
+        tap(app.buttons.labeled("Activity types"))
+        let title = "Delete \u{201C}Bodysuit change\u{201D} and its 1 activity?"
+
+        tap(app.buttons.labeled("Bodysuit change"))
+        tap(app.buttons["Delete activity type"])
+        tap(app.alerts.buttons["Delete"])
+        expect(app.alerts[title])
+        expect(app.staticTexts["Every activity of this type will be removed. This can\u{2019}t be undone."])
+        tap(app.alerts[title].buttons["Cancel"])
+        expectGone(app.alerts[title])
+        tap(app.navigationBars["Edit activity type"].buttons["Cancel"])
+        expect(app.buttons.labeled("Bodysuit change"))
+
+        tap(app.buttons.labeled("Bodysuit change"))
+        tap(app.buttons["Delete activity type"])
+        tap(app.alerts.buttons["Delete"])
+        tap(app.alerts[title].buttons["Delete"])
+        expectGone(app.navigationBars["Edit activity type"])
+        expectGone(app.buttons.labeled("Bodysuit change"))
+
+        tap(app.tabBars.buttons["Home"])
+        expect(element(labeled: "Walk, "))
+        XCTAssertFalse(element(labeled: "Bodysuit change, ").exists, "Its activity went with it")
+    }
+
+    /// The way to manage activity types is where they're used too: under the editor's type list, and
+    /// in the timeline's filter once it's on activities.
+    func testManageTypesFromEditorAndFilter() {
+        launch()
+        openActivityEditor()
+        tap(app.buttons["Manage activity types"])
+        expect(app.navigationBars["Activity types"])
+        tap(app.navigationBars["Activity types"].buttons.element(boundBy: 0)) // back
+        tap(app.navigationBars["New Activity"].buttons["Cancel"])
+
+        tap(app.tabBars.buttons["Timeline"])
+        tap(app.buttons["Filters"])
+        tap(app.buttons.labeled("Type"))
+        tap(app.buttons["Activity"])
+        tap(app.buttons["Manage activity types"])
+        expect(app.navigationBars["Activity types"])
+    }
+
+    /// A user the server doesn't let manage activity types sees neither the screen nor the links.
+    func testReadOnlyHidesActivityTypes() {
+        launch(["BB_START_TAB": "settings", "BB_ACTIVITY_TYPES_READONLY": "1"])
+        expect(app.navigationBars["Settings"])
+        XCTAssertFalse(app.buttons.labeled("Activity types").exists)
+
+        tap(app.tabBars.buttons["Home"])
+        openActivityEditor()
+        expect(app.navigationBars["New Activity"])
+        XCTAssertFalse(app.buttons["Manage activity types"].exists)
+    }
 }

@@ -144,8 +144,53 @@ enum DemoData {
         }
     }
 
-    /// Demo mode's stand-in for what a sync learns about activities from `GET /api/`, and the cached
-    /// activity types. `BB_NO_ACTIVITIES=1` runs the demo as a server without activities.
+    /// Demo mode's `POST /api/activity-types/`: a new type with the next id, the last order and a slug
+    /// made from its name, as the server makes them.
+    @MainActor
+    static func createDemoActivityType(_ body: [String: Any], in context: ModelContext) {
+        let kind = EntityKind.activityType.rawValue
+        let types = (try? context.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let id = (types.compactMap(\.serverID).max() ?? 0) + 1
+        let name = body["name"] as? String ?? ""
+        let slug = name.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }.joined(separator: "-")
+        var p = body
+        p["id"] = id
+        p["slug"] = slug.isEmpty ? "type-\(id)" : slug
+        p["color"] = "#8455b8"
+        p["order"] = id
+        insert(.activityType, id: id, p, context)
+    }
+
+    /// Demo mode's `PATCH /api/activity-types/<id>/`: the changed fields; the slug stays.
+    @MainActor
+    static func updateDemoActivityType(_ type: LocalEntity, with changes: [String: Any], in context: ModelContext) {
+        var p = type.payloadObject
+        for (key, value) in changes { p[key] = value }
+        if let id = type.serverID { insert(.activityType, id: id, p, context) }
+    }
+
+    /// Demo mode's `DELETE /api/activity-types/<id>/`. Like the server, it refuses a type activities
+    /// use, saying how many.
+    @MainActor
+    static func deleteDemoActivityType(_ type: LocalEntity, in context: ModelContext) throws {
+        let id = type.serverID
+        let kind = EntityKind.activity.rawValue
+        let activities = (try? context.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let count = activities.filter { $0.payloadObject["type"] as? Int == id }.count
+        if count > 0 {
+            throw DeleteConflict(message: "This activity type is used by activities and can not be deleted.",
+                                 activityCount: count)
+        }
+        context.delete(type)
+    }
+
+    /// Demo mode's stand-in for what a sync learns about activities from `GET /api/`, the cached
+    /// activity types, and what the user may do with them: everything, or nothing with
+    /// `BB_ACTIVITY_TYPES_READONLY=1`. `BB_NO_ACTIVITIES=1` runs the demo as a server without
+    /// activities.
     @MainActor
     private static func refreshDemoActivities(in context: ModelContext) {
         guard ProcessInfo.processInfo.environment["BB_NO_ACTIVITIES"] != "1" else {
@@ -157,6 +202,9 @@ enum DemoData {
         let types = (try? context.fetch(FetchDescriptor<LocalEntity>(
             predicate: #Predicate { $0.kindRaw == kind }))) ?? []
         ActivitiesCapability.store(typesIn: types)
+        let manages = ProcessInfo.processInfo.environment["BB_ACTIVITY_TYPES_READONLY"] != "1"
+        ActivitiesCapability.store(permissions: .init(add: manages, change: manages, delete: manages,
+                                                      deleteWithActivities: manages))
     }
 
     /// `BB_SEED_SECOND_CHILD=1`: a second child with no records of her own, so the Editor's Baby

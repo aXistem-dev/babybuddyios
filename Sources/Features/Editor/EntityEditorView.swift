@@ -444,7 +444,7 @@ struct EntityEditorView: View {
         return BBCard(cornerRadius: BBRadius.tile, padding: 0) {
             VStack(spacing: 0) {
                 if choices.isEmpty {
-                    Text("No activity types yet. Add them in Baby Buddy.")
+                    Text("No activity types yet.")
                         .font(.subheadline).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 15).padding(.vertical, 13)
@@ -452,6 +452,21 @@ struct EntityEditorView: View {
                 ForEach(Array(choices.enumerated()), id: \.element.id) { index, type in
                     if index > 0 { rowDivider }
                     activityTypeRow(type)
+                }
+                if ActivitiesCapability.permissions.any {
+                    rowDivider
+                    NavigationLink { ActivityTypesView() } label: {
+                        HStack {
+                            Text("Manage activity types").font(.body).foregroundStyle(BBColor.brandAccent)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 15).padding(.vertical, 11)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Manage activity types")
                 }
             }
         }
