@@ -4,7 +4,8 @@ import SwiftData
 /// Starts a new Baby Buddy timer (open-ended: no end). It starts now unless back-dated with the
 /// "−5 / −15 / −30 min" chips or the start picker, for the nap noticed late. Pick an activity from the
 /// grid and the timer remembers it, so stopping it later files straight to that record with no
-/// "convert to…?" step; or start an uncategorized timer with the quiet escape hatch. Created
+/// "convert to…?" step — an activity type with duration too, on a server with activities; or start
+/// an uncategorized timer with the quiet escape hatch. Created
 /// through ``LocalRepository`` like any record, so it works offline and syncs when reconnected.
 struct StartTimerSheet: View {
     @Environment(\.modelContext) private var context
@@ -15,6 +16,9 @@ struct StartTimerSheet: View {
     let childID: Int
     @State private var name = ""
     @State private var selected: EntityKind?
+    /// An activity type picked instead of a kind, by id.
+    @State private var selectedType: Int?
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "activityType" }) private var activityTypeRecords: [LocalEntity]
     /// Minutes before the Start tap (0 = now); `nil` once a start is picked, which `customStart` holds.
     @State private var minutesBack: Int? = 0
     @State private var customStart = Date.now
@@ -33,6 +37,19 @@ struct StartTimerSheet: View {
                         ForEach(activities) { kind in
                             ActivityPickTile(kind: kind, isSelected: selected == kind) {
                                 selected = (selected == kind) ? nil : kind
+                                selectedType = nil
+                            }
+                        }
+                    }
+                    if !timedTypes.isEmpty {
+                        SectionHeader("Activities")
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(timedTypes) { type in
+                                ActivityPickTile(kind: .activity, title: type.name, icon: type.tileIcon,
+                                                 isSelected: selectedType == type.id) {
+                                    selectedType = (selectedType == type.id) ? nil : type.id
+                                    selected = nil
+                                }
                             }
                         }
                     }
@@ -51,6 +68,18 @@ struct StartTimerSheet: View {
             }
             .safeAreaInset(edge: .bottom) { startBar }
         }
+    }
+
+    /// The active activity types with duration, which a timer can time, in the server's order.
+    private var timedTypes: [ActivitiesCapability.TypeInfo] {
+        guard ActivitiesCapability.isSupported else { return [] }
+        let types = activityTypeRecords.filter { $0.syncState != .pendingDelete }
+            .compactMap(ActivitiesCapability.TypeInfo.init)
+        return ActivitiesCapability.sorted(types.filter { $0.active && $0.hasDuration })
+    }
+
+    private var pickedType: ActivitiesCapability.TypeInfo? {
+        selectedType.flatMap { id in timedTypes.first { $0.id == id } }
     }
 
     // MARK: Details
@@ -93,12 +122,14 @@ struct StartTimerSheet: View {
 
     private var startBar: some View {
         VStack(spacing: 6) {
-            Button { start(kind: selected) } label: { Text(startTitle) }
+            Button {
+                if let pickedType { start(type: pickedType) } else { start(kind: selected) }
+            } label: { Text(startTitle) }
                 .buttonStyle(startStyle)
 
             // Lower-emphasis escape hatch: once an activity is picked, still allow an
             // uncategorized timer (with none picked, the primary button already does this).
-            if selected != nil {
+            if selected != nil || pickedType != nil {
                 Button("Start without a type") { start(kind: nil) }
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.secondary)
@@ -112,6 +143,7 @@ struct StartTimerSheet: View {
     }
 
     private var startTitle: String {
+        if let pickedType { return "Start \(pickedType.name.lowercased()) timer" }
         if let selected { return "Start \(selected.displayName.lowercased()) timer" }
         return "Start timer"
     }
@@ -119,8 +151,8 @@ struct StartTimerSheet: View {
     /// The primary button adopts the chosen activity's color (dark-on-tint label for contrast in
     /// both modes); with nothing picked it falls back to the brand-blue primary.
     private var startStyle: BBFilledButton {
-        guard let selected else { return .bbPrimary }
-        return BBFilledButton(background: BBColor.activity(selected),
+        guard let kind = pickedType != nil ? EntityKind.activity : selected else { return .bbPrimary }
+        return BBFilledButton(background: BBColor.activity(kind),
                               foreground: Color.adaptive(light: "FFFFFF", dark: "0C0E12"))
     }
 
@@ -145,6 +177,18 @@ struct StartTimerSheet: View {
         Analytics.timerStarted(activity: activity, source: .app)
         Task { await sync.sync() }
         Task { await liveActivity.reconcile() } // start the Live Activity for the new timer
+        dismiss()
+    }
+
+    /// A timer for an activity type: named after it, unless named here, and remembering it so Stop
+    /// files straight to it.
+    private func start(type: ActivitiesCapability.TypeInfo) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        LocalRepository(context: context).startActivityTimer(
+            type, child: childID, start: startDate(), name: trimmed.isEmpty ? type.name : trimmed)
+        Analytics.timerStarted(activity: "activity", source: .app)
+        Task { await sync.sync() }
+        Task { await liveActivity.reconcile() }
         dismiss()
     }
 }

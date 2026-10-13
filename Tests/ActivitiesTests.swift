@@ -329,4 +329,33 @@ final class ActivitiesTests: XCTestCase {
         XCTAssertEqual(ActivityTypeFields.cascadeTitle(name: "Bath", activityCount: 2),
                        "Delete \u{201C}Bath\u{201D} and its 2 activities?")
     }
+
+    // MARK: Timers
+
+    private func timer(name: String, raw: String? = nil) -> LocalEntity {
+        let payload: [String: Any] = ["child": 1, "start": iso(10), "name": name]
+        return LocalEntity(kind: .timer, serverID: 7, childID: 1, timestamp: EntityKind.timer.timestamp(from: payload),
+                           payload: try! JSONSerialization.data(withJSONObject: payload), syncState: .synced,
+                           timerActivityRaw: raw)
+    }
+
+    /// A timer times the type it was started for on this phone; one started elsewhere, the active
+    /// type with duration it's named after. Types without duration, inactive ones by name, and
+    /// servers without activities give none.
+    func testTimerType() {
+        supportActivities()
+        ActivitiesCapability.store(typesIn: [type(1, "Bath"), type(4, "Walk", hasDuration: true),
+                                             type(6, "Swim", hasDuration: true, active: false)])
+        XCTAssertEqual(ActivitiesCapability.timerActivityRaw(typeID: 4), "activity:4")
+        XCTAssertEqual(ActivitiesCapability.timerType(of: timer(name: "Stroll", raw: "activity:4"))?.id, 4)
+        XCTAssertEqual(ActivitiesCapability.timerType(of: timer(name: "walk"))?.id, 4, "By name, any case")
+        XCTAssertNil(ActivitiesCapability.timerType(of: timer(name: "Bath")), "A moment can't be timed")
+        XCTAssertNil(ActivitiesCapability.timerType(of: timer(name: "Swim")), "Inactive, by name")
+        XCTAssertEqual(ActivitiesCapability.timerType(of: timer(name: "x", raw: "activity:6"))?.id, 6,
+                       "Started for it before it was made inactive")
+        XCTAssertNil(ActivitiesCapability.timerType(of: timer(name: "Sleep", raw: "sleep")))
+
+        ActivitiesCapability.update(rootJSON: Data(#"{"children": "x"}"#.utf8))
+        XCTAssertNil(ActivitiesCapability.timerType(of: timer(name: "Walk", raw: "activity:4")))
+    }
 }

@@ -51,6 +51,9 @@ struct ActivityTile: View {
 struct ActivityPickTile: View {
     @Environment(\.colorScheme) private var scheme
     let kind: EntityKind
+    /// Replace the kind's name and glyph, as an activity type's do.
+    var title: String? = nil
+    var icon: ActivityIcon? = nil
     let isSelected: Bool
     var action: () -> Void
 
@@ -59,7 +62,10 @@ struct ActivityPickTile: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top) {
-                    kind.icon(24).foregroundStyle(color)
+                    Group {
+                        if let icon { icon.view(24) } else { kind.icon(24) }
+                    }
+                    .foregroundStyle(color)
                     Spacer(minLength: 0)
                     ZStack {
                         Circle().fill(color).frame(width: 20, height: 20)
@@ -69,7 +75,7 @@ struct ActivityPickTile: View {
                     .opacity(isSelected ? 1 : 0)
                 }
                 Spacer(minLength: 14)
-                Text(kind.displayName)
+                Text(title ?? kind.displayName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
             }

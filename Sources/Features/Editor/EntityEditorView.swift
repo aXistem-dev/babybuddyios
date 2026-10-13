@@ -784,6 +784,11 @@ struct EntityEditorView: View {
                     Label("Start timer instead", systemImage: "play.fill")
                 }
                 .buttonStyle(BBFilledButton(background: BBColor.brandTint, foreground: BBColor.brandAccent))
+            } else if let type = timedActivityType {
+                Button { startTimer(type) } label: {
+                    Label("Start timer instead", systemImage: "play.fill")
+                }
+                .buttonStyle(BBFilledButton(background: BBColor.brandTint, foreground: BBColor.brandAccent))
             }
 
             if isEditing {
@@ -1024,6 +1029,22 @@ struct EntityEditorView: View {
         Analytics.timerStarted(activity: activity.rawValue, source: .app)
         Task { await sync.sync() }
         Task { await liveActivity.reconcile() } // start the Live Activity for the new timer
+        dismiss()
+    }
+
+    /// A new activity of a type with duration, which can be timed instead.
+    private var timedActivityType: ActivitiesCapability.TypeInfo? {
+        guard kind == .activity, !isEditing, !isConverting, let activityType else { return nil }
+        return activityTypeRecords.lazy.compactMap(ActivitiesCapability.TypeInfo.init)
+            .first { $0.id == activityType && $0.hasDuration }
+    }
+
+    /// Begin timing this activity type instead, from the form's start.
+    private func startTimer(_ type: ActivitiesCapability.TypeInfo) {
+        LocalRepository(context: context).startActivityTimer(type, child: childID, start: start, name: type.name)
+        Analytics.timerStarted(activity: "activity", source: .app)
+        Task { await sync.sync() }
+        Task { await liveActivity.reconcile() }
         dismiss()
     }
 
