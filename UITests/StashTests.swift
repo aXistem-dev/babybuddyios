@@ -99,6 +99,48 @@ final class StashTests: UITestCase {
         expect(app.navigationBars["Edit Milk Stash Entry"])
     }
 
+    /// The history lists the demo's movements newest first, signed: the bottle from the stash, the
+    /// pumping into it, the milk added by hand. A row opens its record.
+    func testHistoryListsMovements() {
+        launch()
+        openStashFromAddSheet()
+        app.swipeUp()
+        expect(app.staticTexts["HISTORY"]) // section headers are drawn in capitals
+        let rows = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH 'Bottle, ' OR label BEGINSWITH 'Pumping, ' OR label BEGINSWITH 'Added, '"))
+        expect(rows.firstMatch)
+        XCTAssertTrue(rows.element(boundBy: 0).label.hasPrefix("Bottle, \u{2212}40 ml"))
+        XCTAssertTrue(rows.element(boundBy: 1).label.hasPrefix("Pumping, +160 ml"))
+        XCTAssertTrue(rows.element(boundBy: 2).label.hasPrefix("Added, +80 ml"))
+
+        tap(app.buttons.labeled("Bottle, "))
+        expect(app.navigationBars["Edit Feeding"])
+    }
+
+    /// Milk added by hand can be deleted from the history, after confirming; a pumping can't be from
+    /// here (its editor deletes it).
+    func testDeleteManualEntryFromHistory() {
+        launch()
+        openStashFromAddSheet()
+        app.swipeUp()
+        app.buttons.labeled("Pumping, ").press(forDuration: 1)
+        XCTAssertFalse(app.buttons["Delete"].waitForExistence(timeout: 2), "No delete for a pumping")
+        // Without a menu, letting go may count as a tap on the row, which opens the pumping.
+        let editor = app.navigationBars["Edit Pumping"]
+        if editor.waitForExistence(timeout: 2) {
+            tap(editor.buttons["Cancel"])
+            expectGone(editor)
+        }
+
+        let added = app.buttons.labeled("Added, +80 ml")
+        expect(added).press(forDuration: 1)
+        tap(app.buttons["Delete"])
+        let alert = expect(app.alerts["Delete this milk stash entry?"])
+        tap(alert.buttons["Delete"])
+        expectGone(added)
+        expect(app.buttons.labeled("Pumping, "))
+    }
+
     /// Adding milk from the screen queues a milk stash entry, and throwing away expired milk waits
     /// until the server has it.
     func testAddMilkFromTheScreen() {
