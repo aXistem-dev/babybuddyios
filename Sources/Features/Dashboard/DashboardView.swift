@@ -239,6 +239,7 @@ struct DashboardView: View {
             }) { timer in
                 StopTimerSheet(timer: timer,
                                onLog: { kind in stopTimer(timer, as: kind) },
+                               onLogActivity: { type in stopTimer(timer, as: type) },
                                onResume: { resumeTimer(timer); stoppingTimer = nil },
                                onDiscard: { discardTimer(timer); stoppingTimer = nil })
             }
@@ -752,6 +753,20 @@ struct DashboardView: View {
         LocalRepository(context: context).convertTimer(timer, to: kind, payload: timer.stoppedTimerPayload())
         let activity = TimerActivity(convertKind: kind)?.rawValue ?? "other"
         Analytics.timerStopped(activity: activity, source: .app)
+        Task { await sync.sync() }
+        Task { await liveActivity.reconcile() } // end the Live Activity for the stopped timer
+        stoppingTimer = nil
+    }
+
+    /// File a stopped timer as an activity of this type, from its start to its stop, in one tap like
+    /// sleep.
+    private func stopTimer(_ timer: LocalEntity, as type: ActivitiesCapability.TypeInfo) {
+        var payload = timer.stoppedTimerPayload()
+        payload["type"] = type.id
+        payload["notes"] = ""
+        payload["tags"] = [String]()
+        LocalRepository(context: context).convertTimer(timer, to: .activity, payload: payload)
+        Analytics.timerStopped(activity: "activity", source: .app)
         Task { await sync.sync() }
         Task { await liveActivity.reconcile() } // end the Live Activity for the stopped timer
         stoppingTimer = nil

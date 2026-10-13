@@ -94,6 +94,25 @@ enum ActivitiesCapability {
         }
     }
 
+    // MARK: Timers
+
+    /// A timer's local `timerActivityRaw` for an activity type, so stopping it files straight to that
+    /// type.
+    static func timerActivityRaw(typeID: Int) -> String { "activity:\(typeID)" }
+
+    /// The activity type a timer is timing: the one it was started for on this phone, else the active
+    /// type with duration it's named after (as one started on another phone is). Nil for a type this
+    /// phone doesn't have, or one without duration.
+    static func timerType(of timer: LocalEntity) -> TypeInfo? {
+        guard isSupported, timer.kind == .timer else { return nil }
+        let types = self.types.filter(\.hasDuration)
+        if let raw = timer.timerActivityRaw, raw.hasPrefix("activity:"), let id = Int(raw.dropFirst("activity:".count)) {
+            return types.first { $0.id == id }
+        }
+        guard let name = timer.payloadObject["name"] as? String, !name.isEmpty else { return nil }
+        return types.first { $0.active && $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame }
+    }
+
     // MARK: Permissions
 
     /// What the signed-in user may do with activity types, as the server says on its type list. The
