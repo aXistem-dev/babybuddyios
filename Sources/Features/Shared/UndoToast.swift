@@ -20,6 +20,8 @@ final class UndoToastCenter {
         let localID: UUID?
         /// Draws the activity tile; `nil` for a toast about something that isn't a record.
         let kind: EntityKind?
+        /// An activity type's icon, drawn in the tile instead of the glyph.
+        var icon: ActivityIcon? = nil
         let title: String
         let subtitle: String?
         let revert: (@MainActor () -> Void)?
@@ -41,8 +43,8 @@ final class UndoToastCenter {
     private var dismissal: Task<Void, Never>?
 
     func show(_ entity: LocalEntity) {
-        present(Item(localID: entity.localID, kind: entity.kind,
-                     title: "Logged \(entity.kind.displayName.lowercased())",
+        present(Item(localID: entity.localID, kind: entity.kind, icon: entity.tileIcon,
+                     title: "Logged \(EntityFormatting.title(entity).lowercased())",
                      subtitle: EntityFormatting.subtitle(entity), revert: nil))
     }
 
@@ -93,7 +95,7 @@ struct UndoToastView: View {
     @ViewBuilder private var toast: some View {
         if let item = center.current {
             HStack(spacing: 11) {
-                if let kind = item.kind { ActivityTile(kind: kind, size: 34, glyph: 18) }
+                if let kind = item.kind { ActivityTile(kind: kind, size: 34, glyph: 18, icon: item.icon) }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.title)
                         .font(.subheadline.weight(.semibold))
@@ -123,7 +125,8 @@ struct UndoToastView: View {
             .padding(.horizontal, 16)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .accessibilityElement(children: .contain)
-            .accessibilityLabel(item.kind.map { "Logged \($0.displayName)" } ?? item.title)
+            // An activity reads as its type ("Logged bath"), which the title already says.
+            .accessibilityLabel(item.kind.map { $0 == .activity ? item.title : "Logged \($0.displayName)" } ?? item.title)
             .accessibilityAction(named: "Undo") { center.undo(in: context) }
         }
     }

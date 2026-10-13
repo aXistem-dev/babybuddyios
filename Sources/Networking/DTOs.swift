@@ -214,6 +214,38 @@ struct MedicationDTO: APIResource {
     var tags: [String]?
 }
 
+/// A user-defined activity type, on a server with activities. Activities refer to it by `id`;
+/// `slug` is fixed when the type is created and survives a rename.
+struct ActivityTypeDTO: APIResource {
+    static let path = "activity-types"
+    var id: Int?
+    var name: String
+    var slug: String?
+    /// One of the server's fixed icon names (see ``ActivityIcon``).
+    var icon: String?
+    /// One emoji shown in place of the icon; `""` when unset.
+    var emoji: String?
+    var color: String?
+    var has_duration: Bool?
+    /// Inactive types are left out of the add menus; their activities stay.
+    var active: Bool?
+    var order: Int?
+}
+
+/// Something done with a child, of one activity type (`type` is that type's id). A type without
+/// duration has `end` equal to `start`.
+struct ActivityDTO: APIResource {
+    static let path = "activities"
+    var id: Int?
+    var child: Int
+    var type: Int
+    var start: Date
+    var end: Date?
+    var duration: String?
+    var notes: String?
+    var tags: [String]?
+}
+
 struct TagDTO: Codable, Identifiable, Hashable {
     var slug: String?
     var name: String
