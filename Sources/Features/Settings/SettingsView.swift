@@ -573,8 +573,8 @@ struct SettingsView: View {
             if stashSupported {
                 rowDivider
 
-                SettingsRow(symbol: "refrigerator", tint: BBColor.pumping, title: "Milk stash expiry") {
-                    Self.alertToggle("Milk stash expiry", $stashAlertsEnabled, setting: "stashAgeAlerts")
+                SettingsRow(symbol: "refrigerator", tint: BBColor.pumping, title: "Stored milk expiry") {
+                    Self.alertToggle("Stored milk expiry", $stashAlertsEnabled, setting: "stashAgeAlerts")
                 }
             }
         }
