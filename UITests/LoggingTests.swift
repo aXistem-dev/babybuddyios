@@ -216,15 +216,16 @@ final class LoggingTests: UITestCase {
         expectGone(bar)
     }
 
-    /// Nothing later than now, as the server has it: a change timed two minutes ahead is refused, not
+    /// Nothing later than now, as the server has it: a change timed five minutes ahead is refused, not
     /// queued to be refused by the server.
     func testTimeMinutesAheadIsRefused() throws {
-        let ahead = Date().addingTimeInterval(120)
-        try XCTSkipUnless(Calendar.current.isDateInToday(ahead.addingTimeInterval(60)),
-                          "Two minutes ahead would land on tomorrow")
+        try XCTSkipUnless(Calendar.current.isDateInToday(Date().addingTimeInterval(8 * 60)),
+                          "Five minutes ahead could land on tomorrow")
         launch()
         openEditor("Diaper")
         let bar = expect(app.navigationBars["New Diaper Change"])
+        // Taken once the editor is open, and with room for a wheel that stops a minute short.
+        let ahead = Date().addingTimeInterval(5 * 60)
         setStartTime(ahead) // the change's Time is its first picker
 
         expect(element(labeled: "Can\u{2019}t save yet. That time is in the future"))
