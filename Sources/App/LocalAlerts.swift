@@ -217,11 +217,11 @@ enum StashAgePolicy {
         return (summary?.lots ?? []).flatMap { lot in
             [ForgottenTimerPolicy.Request(
                 id: "stash-warn-\(Int(lot.warn_at.timeIntervalSince1970))", fireDate: lot.warn_at,
-                title: "Milk expiring soon", body: "Some milk in the stash expires soon. Use it first.",
+                title: "Milk expiring soon", body: "Some stored milk expires soon. Use it first.",
                 url: "babybuddy://stash"),
              ForgottenTimerPolicy.Request(
                 id: "stash-expire-\(Int(lot.expires_at.timeIntervalSince1970))", fireDate: lot.expires_at,
-                title: "Milk has expired", body: "Some milk in the stash has expired. Throw it away.",
+                title: "Milk has expired", body: "Some stored milk has expired. Throw it away.",
                 url: "babybuddy://stash")]
         }
         .filter { seen.insert($0.id).inserted }

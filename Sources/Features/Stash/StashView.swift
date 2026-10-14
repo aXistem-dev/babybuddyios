@@ -45,7 +45,7 @@ struct StashView: View {
             .padding(.bottom, 28)
         }
         .background(BBColor.surface)
-        .navigationTitle("Milk stash")
+        .navigationTitle("Stored milk")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await sync.sync() }
         .sheet(item: $newEntry) { entry in
@@ -55,7 +55,7 @@ struct StashView: View {
             EntityEditorView(kind: entity.kind, childID: entity.childID ?? childID, entity: entity)
         }
         // `.alert`, not `confirmationDialog`: iOS 26 drops the cancel action of a dialog shown as a popover.
-        .alert("Delete this milk stash entry?",
+        .alert("Delete this stored milk entry?",
                isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
             Button("Delete", role: .destructive) { deleteEntry() }
             Button("Cancel", role: .cancel) { deleting = nil }
@@ -69,13 +69,13 @@ struct StashView: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("In the stash").font(.subheadline).foregroundStyle(.secondary)
+                        Text("In storage").font(.subheadline).foregroundStyle(.secondary)
                         Text(balance)
                             .font(.largeTitle.weight(.semibold)).monospacedDigit()
                             .foregroundStyle(below ? BBColor.danger : Color.primary)
                     }
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("In the stash, \(balance)")
+                    .accessibilityLabel("In storage, \(balance)")
                     Spacer(minLength: 8)
                     if let summary, !summary.lots.isEmpty { StashStatusChip(status: summary.status(at: now)) }
                 }
@@ -100,11 +100,11 @@ struct StashView: View {
     @ViewBuilder private func lotsSection(_ summary: StashSummaryDTO, now: Date) -> some View {
         let expired = (summary.expiredAmount(at: now) * 100).rounded() / 100
         VStack(alignment: .leading, spacing: 9) {
-            SectionHeader("Milk in the stash")
+            SectionHeader("Milk in storage")
             BBCard(cornerRadius: BBRadius.tile, padding: 0) {
                 VStack(spacing: 0) {
                     if summary.lots.isEmpty {
-                        Text("No milk in the stash.")
+                        Text("No milk is stored.")
                             .font(.subheadline).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 15).padding(.vertical, 13)
@@ -122,7 +122,7 @@ struct StashView: View {
                 .buttonStyle(BBFilledButton(background: BBColor.danger.opacity(0.14), foreground: BBColor.danger))
                 .disabled(!queued.isEmpty)
                 if !queued.isEmpty {
-                    Text("Waiting to sync the last milk stash entry first.")
+                    Text("Waiting to sync the last stored milk entry first.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }

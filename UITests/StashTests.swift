@@ -3,12 +3,12 @@ import XCTest
 /// The milk stash, on a demo server that has it: a fixed stash of expired, expiring and fresh milk.
 /// `BB_NO_STASH=1` runs the demo as a server without the milk stash.
 final class StashTests: UITestCase {
-    /// "Into the milk stash" starts off, and a new pumping starts with the last choice.
+    /// "Store this milk" starts off, and a new pumping starts with the last choice.
     func testPumpingIntoStashRemembersTheLastChoice() {
         launch(["BB_TOAST_SECONDS": "30"])
         openEditor("Pumping")
         let bar = expect(app.navigationBars["New Pumping"])
-        let intoStash = app.switches["Into the milk stash"]
+        let intoStash = app.switches["Store this milk"]
         expectValue(intoStash, "0")
         toggle(intoStash, to: "1")
         let amount = app.textFields["0"]
@@ -20,15 +20,15 @@ final class StashTests: UITestCase {
 
         openEditor("Pumping")
         expect(app.navigationBars["New Pumping"])
-        expectValue(app.switches["Into the milk stash"], "1")
+        expectValue(app.switches["Store this milk"], "1")
     }
 
-    /// "From the milk stash" is only offered for breast milk not fed at the breast, with an amount.
+    /// "From stored milk" is only offered for breast milk not fed at the breast, with an amount.
     func testFromStashOnlyForBreastMilkBottles() {
         launch()
         openEditor("Feeding")
         expect(app.navigationBars["New Feeding"])
-        let fromStash = app.switches["From the milk stash"]
+        let fromStash = app.switches["From stored milk"]
         XCTAssertFalse(fromStash.exists, "A breastfeed doesn't come from the stash")
 
         tap(app.buttons.labeled("Left Breast"))
@@ -51,7 +51,7 @@ final class StashTests: UITestCase {
         launch(["BB_NO_STASH": "1"])
         openEditor("Pumping")
         expect(app.navigationBars["New Pumping"])
-        XCTAssertFalse(app.switches["Into the milk stash"].exists)
+        XCTAssertFalse(app.switches["Store this milk"].exists)
         tap(app.navigationBars["New Pumping"].buttons["Cancel"])
         openEditor("Feeding")
         expect(app.navigationBars["New Feeding"])
@@ -61,16 +61,16 @@ final class StashTests: UITestCase {
         let amount = app.textFields["0"]
         tap(amount)
         amount.typeText("60")
-        XCTAssertFalse(app.switches["From the milk stash"].exists)
+        XCTAssertFalse(app.switches["From stored milk"].exists)
     }
 
     /// Home shows the stash while it holds milk, and its screen lists the demo's milk oldest first:
     /// 80 ml expired, 120 ml expiring soon and 150 ml fresh.
     func testStashScreenShowsBalanceAndMilk() {
         launch()
-        tap(element(labeled: "Milk stash, 350 ml, Some milk has expired"))
-        expect(app.navigationBars["Milk stash"])
-        expect(element(labeled: "In the stash, 350 ml"))
+        tap(element(labeled: "Stored milk, 350 ml, Some milk has expired"))
+        expect(app.navigationBars["Stored milk"])
+        expect(element(labeled: "In storage, 350 ml"))
         let lots = elements("label CONTAINS ', Stored '")
         expect(lots.firstMatch)
         XCTAssertEqual(lots.count, 3)
@@ -96,7 +96,7 @@ final class StashTests: UITestCase {
         expectGone(pumping)
 
         tap(app.buttons.matching(NSPredicate(format: "label BEGINSWITH '80 ml, Stored '")).firstMatch)
-        expect(app.navigationBars["Edit Milk Stash Entry"])
+        expect(app.navigationBars["Edit Stored Milk Entry"])
     }
 
     /// The history lists the demo's movements newest first, signed: the bottle from the stash, the
@@ -135,7 +135,7 @@ final class StashTests: UITestCase {
         let added = app.buttons.labeled("Added, +80 ml")
         expect(added).press(forDuration: 1)
         tap(app.buttons["Delete"])
-        let alert = expect(app.alerts["Delete this milk stash entry?"])
+        let alert = expect(app.alerts["Delete this stored milk entry?"])
         tap(alert.buttons["Delete"])
         expectGone(added)
         expect(app.buttons.labeled("Pumping, "))
@@ -155,7 +155,7 @@ final class StashTests: UITestCase {
         tap(bar.buttons["Save"])
         expectGone(bar)
 
-        expect(app.staticTexts["Waiting to sync the last milk stash entry first."])
+        expect(app.staticTexts["Waiting to sync the last stored milk entry first."])
         XCTAssertFalse(app.buttons["Throw Away Expired Milk"].isEnabled)
     }
 
@@ -176,31 +176,31 @@ final class StashTests: UITestCase {
     func testNoStashWithoutStash() {
         launch(["BB_NO_STASH": "1"])
         expect(element(labeled: "Diapers, "))
-        XCTAssertFalse(element(labeled: "Milk stash").exists)
+        XCTAssertFalse(element(labeled: "Stored milk").exists)
         tap(app.buttons["Add"])
         tap(app.buttons.labeled("More…"))
         expect(app.navigationBars["Add Activity"])
-        XCTAssertFalse(app.buttons.labeled("Milk stash").exists)
+        XCTAssertFalse(app.buttons.labeled("Stored milk").exists)
     }
 
     private func openStashFromAddSheet() {
         tap(app.buttons["Add"])
         tap(app.buttons.labeled("More…"))
         expect(app.navigationBars["Add Activity"])
-        tap(app.buttons.labeled("Milk stash"))
-        expect(app.navigationBars["Milk stash"])
+        tap(app.buttons.labeled("Stored milk"))
+        expect(app.navigationBars["Stored milk"])
     }
 
     /// Settings offers the milk stash's expiry alerts only on a server with the stash. (UI tests
     /// start with them off; delivering an alert is covered by the unit tests.)
     func testMilkStashExpirySetting() {
         launch(["BB_START_TAB": "settings"])
-        let expiry = app.switches["Milk stash expiry"]
+        let expiry = app.switches["Stored milk expiry"]
         expectValue(expiry, "0")
 
         launch(["BB_START_TAB": "settings", "BB_NO_STASH": "1"])
         expect(app.switches["Medication reminders"])
-        XCTAssertFalse(app.switches["Milk stash expiry"].exists)
+        XCTAssertFalse(app.switches["Stored milk expiry"].exists)
     }
 
     /// A milk stash alert's link opens the stash screen.
@@ -208,6 +208,6 @@ final class StashTests: UITestCase {
         launch()
         expect(element(labeled: "Diapers, "))
         app.open(URL(string: "babybuddy://stash")!)
-        expect(app.navigationBars["Milk stash"])
+        expect(app.navigationBars["Stored milk"])
     }
 }

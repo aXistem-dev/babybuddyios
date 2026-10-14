@@ -97,7 +97,7 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .temperature: return "Temperature"
         case .bmi: return "BMI"
         case .medication: return "Medication"
-        case .stashAdjustment: return "Milk Stash Entry"
+        case .stashAdjustment: return "Stored Milk Entry"
         }
     }
 

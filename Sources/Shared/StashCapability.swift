@@ -7,7 +7,7 @@ enum StashCapability {
     static let supportedKey = "stashSupported"
     static let summaryKey = "stashSummary"
 
-    /// The phone's last choice of "Into the milk stash" on pumping and "From the milk stash" on a
+    /// The phone's last choice of "Store this milk" on pumping and "From stored milk" on a
     /// bottle, which the next one starts with (`UserDefaults.standard`).
     static let pumpingToStashKey = "pumpingToStash"
     static let bottleFromStashKey = "bottleFromStash"
