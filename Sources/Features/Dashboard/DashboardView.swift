@@ -42,11 +42,19 @@ struct DashboardView: View {
     /// Whether the server has the milk stash, and its summary, for the stash card.
     @AppStorage(StashCapability.supportedKey, store: SharedDefaults.suite) private var stashSupported = false
     @AppStorage(StashCapability.summaryKey, store: SharedDefaults.suite) private var stashData: Data?
+    /// The activity type a new activity opens on (a type with duration tapped in the "More" sheet),
+    /// and the same deferred until that sheet has dismissed.
+    @State private var addActivityType: Int?
+    @State private var pendingActivityType: Int?
     @State private var stoppingTimer: LocalEntity?
     @State private var convertRequest: ConvertRequest?
     /// A convert deferred until the Stop sheet finishes dismissing, so the detail editor doesn't
     /// try to present while another sheet is still on screen.
     @State private var pendingConvert: ConvertRequest?
+    /// Whether the server has activities; watched so the first sync that finds them offers them.
+    @AppStorage(ActivitiesCapability.supportedKey, store: SharedDefaults.suite) private var activitiesSupported = false
+    /// The cached activity types, for one-tap activity logging.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "activityType" }) private var activityTypeRecords: [LocalEntity]
 
     // MARK: Support nudge state
     //
@@ -190,17 +198,34 @@ struct DashboardView: View {
                         onMore: { showAllActivities = true })
                 }
             }
-            .sheet(item: $addKind) { kind in
-                EntityEditorView(kind: kind, childID: selectedChildID)
+            .sheet(item: $addKind, onDismiss: { addActivityType = nil }) { kind in
+                EntityEditorView(kind: kind, childID: selectedChildID,
+                                 activityTypePreset: kind == .activity ? addActivityType : nil)
             }
             .sheet(isPresented: $showAllActivities, onDismiss: {
                 // Open the editor only after the "More" sheet is fully gone.
+                addActivityType = pendingActivityType
+                pendingActivityType = nil
                 if let pendingAddKind { addKind = pendingAddKind; self.pendingAddKind = nil }
                 if pendingStash { navPath.append(.stash); pendingStash = false }
             }) {
                 AllActivitiesSheet(
                     showsSickMode: sickModeStart == nil,
                     showsStash: stashSupported,
+                    showsActivities: activitiesSupported,
+                    activityTypes: activitiesSupported
+                        ? ActivityUsage.topTypes(activities: childEntities, types: activityTypes,
+                                                 child: selectedChildID, now: .now)
+                        : [],
+                    onLogActivity: { type in
+                        showAllActivities = false
+                        if type.hasDuration {
+                            pendingActivityType = type.id
+                            pendingAddKind = .activity
+                        } else {
+                            logActivity(type)
+                        }
+                    },
                     onPick: { kind in pendingAddKind = kind; showAllActivities = false },
                     onOpenStash: { pendingStash = true; showAllActivities = false },
                     onStartSickMode: {
@@ -232,6 +257,7 @@ struct DashboardView: View {
             }) { timer in
                 StopTimerSheet(timer: timer,
                                onLog: { kind in stopTimer(timer, as: kind) },
+                               onLogActivity: { type in stopTimer(timer, as: type) },
                                onResume: { resumeTimer(timer); stoppingTimer = nil },
                                onDiscard: { discardTimer(timer); stoppingTimer = nil })
             }
@@ -613,6 +639,22 @@ struct DashboardView: View {
         .accessibilityLabel("Next feed estimate: \(estimate.line)")
     }
 
+    // MARK: Activities
+
+    /// The cached activity types.
+    private var activityTypes: [ActivitiesCapability.TypeInfo] {
+        activityTypeRecords.filter { $0.syncState != .pendingDelete }.compactMap(ActivitiesCapability.TypeInfo.init)
+    }
+
+    /// One tap in the Add Activity sheet: this type, which has no duration, for the selected child,
+    /// now. Queued like any other record, so it works offline and can be undone from the toast.
+    private func logActivity(_ type: ActivitiesCapability.TypeInfo) {
+        let payload = EntityEditorView.activityPayload(child: selectedChildID, type: type.id, hasDuration: false,
+                                                       start: .now, end: .now, time: .now, notes: "", tags: [])
+        LocalRepository(context: context).create(kind: .activity, payload: payload, source: .quickAdd)
+        Task { await sync.sync() }
+    }
+
     /// Wrap a "Today" tile so tapping it pushes a single-day, single-kind timeline slice.
     private func metricLink<Content: View>(_ kind: EntityKind,
                                            @ViewBuilder _ tile: () -> Content) -> some View {
@@ -804,6 +846,20 @@ struct DashboardView: View {
         stoppingTimer = nil
     }
 
+    /// File a stopped timer as an activity of this type, from its start to its stop, in one tap like
+    /// sleep.
+    private func stopTimer(_ timer: LocalEntity, as type: ActivitiesCapability.TypeInfo) {
+        var payload = timer.stoppedTimerPayload()
+        payload["type"] = type.id
+        payload["notes"] = ""
+        payload["tags"] = [String]()
+        LocalRepository(context: context).convertTimer(timer, to: .activity, payload: payload)
+        Analytics.timerStopped(activity: "activity", source: .app)
+        Task { await sync.sync() }
+        Task { await liveActivity.reconcile() } // end the Live Activity for the stopped timer
+        stoppingTimer = nil
+    }
+
     /// Discard a stopped timer without logging anything.
     private func discardTimer(_ timer: LocalEntity) {
         LocalRepository(context: context).discardStoppedTimer(timer)
@@ -838,8 +894,10 @@ struct DashboardView: View {
         childEntities.first { $0.kind == kind }
     }
 
+    /// The newest record of each kind, activities too on a server with them, newest first.
     private var latestEvents: [LocalEntity] {
-        recentKinds.compactMap { lastEvent(of: $0) }.sorted { $0.timestamp > $1.timestamp }
+        (recentKinds + (activitiesSupported ? [.activity] : []))
+            .compactMap { lastEvent(of: $0) }.sorted { $0.timestamp > $1.timestamp }
     }
 
     /// The newest dose of each medication whose next dose is still ahead, soonest first.
@@ -1006,6 +1064,12 @@ private struct AllActivitiesSheet: View {
     var showsSickMode: Bool
     /// Whether the server has the milk stash, so the sheet offers its screen.
     var showsStash: Bool
+    /// Whether the server has activities, which then get their own section below the measurements.
+    var showsActivities = false
+    /// The child's most used activity types (see ``ActivityUsage/topTypes``), each logged with one
+    /// tap; empty without activities.
+    var activityTypes: [ActivitiesCapability.TypeInfo] = []
+    var onLogActivity: (ActivitiesCapability.TypeInfo) -> Void = { _ in }
     var onPick: (EntityKind) -> Void
     var onOpenStash: () -> Void
     var onStartSickMode: () -> Void
@@ -1021,6 +1085,7 @@ private struct AllActivitiesSheet: View {
                     section("Log", logKinds)
                     section("Measure", measureKinds)
                     if showsStash { stashRow }
+                    if showsActivities { activitiesSection }
                     if showsSickMode { sickModeRow }
                 }
                 .padding()
@@ -1071,6 +1136,37 @@ private struct AllActivitiesSheet: View {
             }
         }
         .buttonStyle(.plain)
+    }
+
+    /// A tile per most used activity type, and "New activity…" for the editor with every type. A type
+    /// without duration logs now; one with duration opens the editor on it, for its start and end.
+    private var activitiesSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader("Activities")
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(activityTypes) { type in
+                    Button { onLogActivity(type) } label: {
+                        tileLabel(Text(type.name), icon: type.tileIcon)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Log \(type.name)")
+                    .accessibilityHint(type.hasDuration ? "Opens the editor for its start and end" : "Logs it now")
+                }
+                Button { onPick(.activity) } label: {
+                    tileLabel(Text("New activity\u{2026}"))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("New activity\u{2026}")
+            }
+        }
+    }
+
+    private func tileLabel(_ title: Text, icon: ActivityIcon? = nil) -> some View {
+        VStack(spacing: 7) {
+            ActivityTile(kind: .activity, size: 56, glyph: 27, icon: icon)
+            title.font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func section(_ title: String, _ kinds: [EntityKind]) -> some View {

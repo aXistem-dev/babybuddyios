@@ -6,10 +6,19 @@ extension EntityKind {
     /// Asset-catalog name of the custom glyph, e.g. `glyph_feeding`.
     var assetName: String { "glyph_\(rawValue)" }
 
-    /// The category's icon as a tintable SwiftUI `Image`. Milk stash entries have no glyph in the
-    /// web app's icon font, so they use their SF Symbol.
+    /// Whether the asset catalog has a custom glyph for this kind. The activity kinds have none (each
+    /// type brings its own icon), nor do milk stash entries (the web app's icon font has no glyph for
+    /// them); they use their SF Symbol instead.
+    var hasGlyph: Bool {
+        switch self {
+        case .activityType, .activity, .stashAdjustment: return false
+        default: return true
+        }
+    }
+
+    /// The category's icon as a tintable SwiftUI `Image`.
     var iconImage: Image {
-        (self == .stashAdjustment ? Image(systemName: systemImage) : Image(assetName)).renderingMode(.template)
+        (hasGlyph ? Image(assetName) : Image(systemName: systemImage)).renderingMode(.template)
     }
 
     /// Size-constrained icon view. Required because the custom glyphs have large intrinsic
@@ -20,5 +29,22 @@ extension EntityKind {
     func icon(_ size: CGFloat = 18) -> some View {
         iconImage.resizable().scaledToFit().frame(width: size, height: size)
             .accessibilityHidden(true)
+    }
+}
+
+extension ActivityIcon {
+    /// The icon at `size` points, decorative for VoiceOver like ``EntityKind/icon(_:)``. A glyph or
+    /// symbol takes the foreground style; an emoji keeps its own colours.
+    @ViewBuilder func view(_ size: CGFloat = 18) -> some View {
+        switch self {
+        case .emoji(let emoji):
+            Text(emoji).font(.system(size: size)).accessibilityHidden(true)
+        case .glyph(let kind):
+            kind.icon(size)
+        case .symbol(let name):
+            Image(systemName: name).renderingMode(.template)
+                .resizable().scaledToFit().frame(width: size, height: size)
+                .accessibilityHidden(true)
+        }
     }
 }

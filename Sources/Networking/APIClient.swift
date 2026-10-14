@@ -258,6 +258,15 @@ final class APIClient {
         _ = try await sendRaw(try makeRequest(path: "\(path)/\(id)/", method: "DELETE"))
     }
 
+    /// DELETE a record the server may refuse to delete while it's in use, with optional query
+    /// parameters. A 409 throws ``DeleteConflict``, carrying the server's reason and how many records
+    /// use it.
+    func deleteInUse(path: String, id: Int, query: [URLQueryItem] = []) async throws {
+        let (data, http) = try await fetch(try makeRequest(path: "\(path)/\(id)/", method: "DELETE", query: query))
+        if http.statusCode == 409 { throw DeleteConflict(from: data) }
+        _ = try check(data, http)
+    }
+
     /// Split a list body into per-record JSON `Data` plus a has-next flag.
     ///
     /// The modern shape is DRF's `{ "results": [...], "next": … }`. Some Baby Buddy servers answer
@@ -435,6 +444,24 @@ final class APIClient {
             return "\(label): \(plain)"
         }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
+    }
+}
+
+/// A refused delete (409): the record is still in use. `message` is the server's `detail`, and
+/// `activityCount` how many activities use it, when the server says.
+struct DeleteConflict: Error, Equatable {
+    var message: String?
+    var activityCount: Int?
+
+    init(message: String?, activityCount: Int?) {
+        self.message = message
+        self.activityCount = activityCount
+    }
+
+    init(from data: Data) {
+        let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        message = body?["detail"] as? String ?? APIClient.errorMessage(from: data)
+        activityCount = body?["activity_count"] as? Int
     }
 }
 

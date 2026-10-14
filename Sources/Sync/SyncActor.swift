@@ -41,6 +41,7 @@ actor SyncActor {
         }
         // First, so the kinds below know whether to pull milk stash entries.
         if await refreshStash(client: client) { changed = true }
+        if await refreshActivities(client: client) { changed = true }
         var serverError: APIError?   // last 5xx seen; surfaced only if *every* kind fails this way
         var pulledAnyKind = false
         for kind in EntityKind.syncedKinds {
@@ -81,6 +82,7 @@ actor SyncActor {
         if !pulledAnyKind, let serverError {
             return Self.fail(serverError, endpoint: "all", changed: changed)
         }
+        if await refreshActivityTypes(client: client) { changed = true }
         return PullOutcome(error: nil, changed: changed)
     }
 
@@ -110,6 +112,40 @@ actor SyncActor {
             Analytics.error(network: "pull-stash")
         }
         return StashCapability.summary != previous
+    }
+
+    /// Refresh whether the server has activities (its API root lists the activity routes), before
+    /// the kinds are pulled, so a server without them isn't asked for routes it doesn't have. Never
+    /// fails the sync: a network or HTTP error keeps what was known. Returns whether it changed, so
+    /// the pull counts as a change and what shows activities refreshes.
+    private func refreshActivities(client: APIClient) async -> Bool {
+        let hadActivities = ActivitiesCapability.isSupported
+        do {
+            ActivitiesCapability.update(rootJSON: try await client.getRawPath(""))
+        } catch let error as APIError {
+            Analytics.report(error, context: "pull-activities")
+        } catch {
+            Analytics.error(network: "pull-activities")
+        }
+        return ActivitiesCapability.isSupported != hadActivities
+    }
+
+    /// Cache the pulled activity types for the rows that show an activity, and what this user may do
+    /// with them (the `permissions` of the type list's first page). See ``ActivitiesCapability``.
+    /// Returns whether any of it changed, so a rename shows without new activities.
+    private func refreshActivityTypes(client: APIClient) async -> Bool {
+        guard ActivitiesCapability.isSupported else { return false }
+        let before = ActivitiesCapability.types
+        let permissions = ActivitiesCapability.permissions
+        let kind = EntityKind.activityType.rawValue
+        let types = (try? modelContext.fetch(FetchDescriptor<LocalEntity>(
+            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        ActivitiesCapability.store(typesIn: types)
+        // A failed request keeps the permissions this phone last had.
+        if let page = try? await client.getRawPath(ActivitiesCapability.typeListPath) {
+            ActivitiesCapability.store(permissions: ActivitiesCapability.permissions(fromListJSON: page))
+        }
+        return ActivitiesCapability.types != before || ActivitiesCapability.permissions != permissions
     }
 
     /// Report a pull failure and turn it into the outcome the caller surfaces. `endpoint` is the

@@ -24,6 +24,8 @@ struct EntityEditorView: View {
     let template: LocalEntity?
     /// Where a new record's `Activity.logged` says it came from.
     let source: Analytics.ActivitySource
+    /// The activity type (by id) a new activity starts on; none, and the customer picks one.
+    let activityTypePreset: Int?
 
     /// The record kind. Mirrored into state so the top activity selector can swap it while
     /// creating; locked to the passed-in value when editing or converting.
@@ -38,12 +40,14 @@ struct EntityEditorView: View {
     /// `stashKind` and `amount` start a new milk stash entry: "Discard milk" with the expired amount.
     init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil,
          template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor,
-         stashKind: StashKind = .added, amount: Double? = nil) {
+         stashKind: StashKind = .added, amount: Double? = nil,
+         activityTypePreset: Int? = nil) {
         self.childID = childID
         self.entity = entity
         self.sourceTimer = sourceTimer
         self.template = template
         self.source = source
+        self.activityTypePreset = activityTypePreset
         _kind = State(initialValue: kind)
         _selectedChildID = State(initialValue: childID)
         _stashKind = State(initialValue: stashKind)
@@ -95,9 +99,13 @@ struct EntityEditorView: View {
     @State private var doseInterval: DoseInterval = .none
     @State private var customDoseHours = ""
     @State private var customDoseMinutes = ""
+    // Activity, on a server with activities: the chosen activity type's id.
+    @State private var activityType: Int?
 
     /// Every cached dose, so a dose synced in while the editor is open still raises the warning.
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" }) private var medications: [LocalEntity]
+    /// The cached activity types, for an activity's type picker on a server with activities.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "activityType" }) private var activityTypeRecords: [LocalEntity]
 
     @State private var confirmingDelete = false
     /// Bumped when Save finds a time that has turned out to be in the future, so the form redraws
@@ -120,7 +128,7 @@ struct EntityEditorView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    if kind == .timer || kind == .child {
+                    if kind == .timer || kind == .child || kind == .activityType {
                         Text("Not editable here.").foregroundStyle(.secondary)
                     } else {
                         editorContent
@@ -212,8 +220,14 @@ struct EntityEditorView: View {
     @ViewBuilder private var formSections: some View {
         syncErrorBanner
         babySection
-        sectioned("When") { whenCard }
-        sectioned(detailsTitle) { detailsCard }
+        if kind == .activity {
+            // The type decides the When card: one time, or a start and an end.
+            sectioned(detailsTitle) { detailsCard }
+            sectioned("When") { whenCard }
+        } else {
+            sectioned("When") { whenCard }
+            sectioned(detailsTitle) { detailsCard }
+        }
         sectioned("Tags") { tagsCard }
         if showsNotes { sectioned("Notes") { notesCard } }
         doseWarning
@@ -340,9 +354,17 @@ struct EntityEditorView: View {
                     endRow
                 case .change, .note, .temperature, .medication, .stashAdjustment:
                     pickerRow("Time", selection: $time, components: [.date, .hourAndMinute])
+                case .activity:
+                    if activityHasDuration {
+                        pickerRow("Start", selection: $start, components: [.date, .hourAndMinute])
+                        rowDivider
+                        endRow
+                    } else {
+                        pickerRow("Time", selection: $time, components: [.date, .hourAndMinute])
+                    }
                 case .weight, .height, .headCircumference, .bmi:
                     pickerRow("Date", selection: $date, components: .date)
-                case .timer, .child:
+                case .timer, .child, .activityType:
                     EmptyView()
                 }
             }
@@ -380,7 +402,13 @@ struct EntityEditorView: View {
 
     // MARK: Details card (type-specific)
 
-    private var detailsTitle: String { kind == .note ? "Note" : "Details" }
+    private var detailsTitle: String {
+        switch kind {
+        case .note: return "Note"
+        case .activity: return "Activity Type"
+        default: return "Details"
+        }
+    }
 
     @ViewBuilder private var detailsCard: some View {
         switch kind {
@@ -432,9 +460,91 @@ struct EntityEditorView: View {
                     fieldLabeled("Amount") { amountStepper }
                 }
             }
-        case .timer, .child:
+        case .activity:
+            activityTypePicker
+        case .timer, .child, .activityType:
             EmptyView()
         }
+    }
+
+    /// What was done: a row per active activity type, in the server's order. The type decides the
+    /// When card: one time, or a start and an end for a type that tracks duration.
+    private var activityTypePicker: some View {
+        let choices = activityTypeChoices
+        return BBCard(cornerRadius: BBRadius.tile, padding: 0) {
+            VStack(spacing: 0) {
+                if choices.isEmpty {
+                    Text("No activity types yet.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 15).padding(.vertical, 13)
+                }
+                ForEach(Array(choices.enumerated()), id: \.element.id) { index, type in
+                    if index > 0 { rowDivider }
+                    activityTypeRow(type)
+                }
+                if ActivitiesCapability.permissions.any {
+                    rowDivider
+                    NavigationLink { ActivityTypesView() } label: {
+                        HStack {
+                            Text("Manage activity types").font(.body).foregroundStyle(BBColor.brandAccent)
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.horizontal, 15).padding(.vertical, 11)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Manage activity types")
+                }
+            }
+        }
+    }
+
+    private func activityTypeRow(_ type: ActivitiesCapability.TypeInfo) -> some View {
+        let selected = activityType == type.id
+        return Button {
+            activityType = type.id
+        } label: {
+            HStack(spacing: 12) {
+                ActivityTile(kind: .activity, size: 30, glyph: 17, icon: type.tileIcon)
+                Text(type.name).font(.body).foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(selected ? BBColor.customActivity : Color.secondary.opacity(0.5))
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 15).padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// The active activity types, and an edited activity's own type even when it's inactive.
+    private var activityTypeChoices: [ActivitiesCapability.TypeInfo] {
+        Self.activityTypeChoices(activityTypeRecords, keeping: activityType)
+    }
+
+    static func activityTypeChoices(_ records: [LocalEntity], keeping current: Int?) -> [ActivitiesCapability.TypeInfo] {
+        let types = records.filter { $0.syncState != .pendingDelete }.compactMap(ActivitiesCapability.TypeInfo.init)
+        return ActivitiesCapability.sorted(types.filter { $0.active || $0.id == current })
+    }
+
+    /// Whether the chosen activity type tracks duration.
+    private var activityHasDuration: Bool {
+        guard let activityType else { return false }
+        return activityTypeRecords.lazy.compactMap(ActivitiesCapability.TypeInfo.init)
+            .first { $0.id == activityType }?.hasDuration ?? false
+    }
+
+    /// The chosen activity type's name, for the overlap warning.
+    private var activityTypeName: String? {
+        guard let activityType else { return nil }
+        return activityTypeRecords.lazy.compactMap(ActivitiesCapability.TypeInfo.init)
+            .first { $0.id == activityType }?.name
     }
 
     private var feedingDetails: some View {
@@ -718,6 +828,11 @@ struct EntityEditorView: View {
                     Label("Start timer instead", systemImage: "play.fill")
                 }
                 .buttonStyle(BBFilledButton(background: BBColor.brandTint, foreground: BBColor.brandAccent))
+            } else if let type = timedActivityType {
+                Button { startTimer(type) } label: {
+                    Label("Start timer instead", systemImage: "play.fill")
+                }
+                .buttonStyle(BBFilledButton(background: BBColor.brandTint, foreground: BBColor.brandAccent))
             }
 
             if isEditing {
@@ -736,7 +851,8 @@ struct EntityEditorView: View {
     private var draft: ActivityDraft {
         ActivityDraft(kind: kind, start: start, end: end, time: time, date: date,
                       amount: amount, value: value, dosage: dosage,
-                      noteText: noteText, medName: medName)
+                      noteText: noteText, medName: medName,
+                      activityType: activityType, activityHasDuration: activityHasDuration)
     }
 
     private var problem: ActivityProblem? {
@@ -770,7 +886,8 @@ struct EntityEditorView: View {
     /// the other entry afterwards.
     @ViewBuilder private var overlapWarning: some View {
         if let other = overlappingRecord, let period = ActivityDraft.period(of: other) {
-            let message = "Overlaps the \(period.formatted(.interval.hour().minute())) \(kind.displayName.lowercased()). Baby Buddy won\u{2019}t accept both."
+            let name = (kind == .activity ? activityTypeName : nil) ?? kind.displayName
+            let message = "Overlaps the \(period.formatted(.interval.hour().minute())) \(name.lowercased()). Baby Buddy won\u{2019}t accept both."
             warningNotice(message, accessibilityLabel: "Warning. \(message)")
         }
     }
@@ -779,14 +896,16 @@ struct EntityEditorView: View {
     /// period at 24 hours, so anything starting earlier than that has already ended. Checked against
     /// the child the entry will be saved under, which the Baby picker can change.
     private var overlappingRecord: LocalEntity? {
-        guard ActivityDraft.overlapCheckedKinds.contains(kind) else { return nil }
+        guard ActivityDraft.overlapCheckedKinds.contains(kind), kind != .activity || activityHasDuration
+        else { return nil }
         let kindRaw = kind.rawValue, child = Optional(selectedChildID)
         let earliest = start.addingTimeInterval(-24 * 3600), latest = end
         let candidates = (try? context.fetch(FetchDescriptor<LocalEntity>(predicate: #Predicate {
             $0.kindRaw == kindRaw && $0.childID == child && $0.timestamp >= earliest && $0.timestamp < latest
         }))) ?? []
         return ActivityDraft.overlapping(kind: kind, childID: selectedChildID, start: start, end: end,
-                                         excluding: entity?.localID, in: candidates)
+                                         excluding: entity?.localID, activityType: activityType,
+                                         in: candidates)
     }
 
     private func warningNotice(_ message: String, accessibilityLabel: String) -> some View {
@@ -870,6 +989,7 @@ struct EntityEditorView: View {
             toStash = lastToStash
             fromStash = lastFromStash
         }
+        if entity == nil, let activityTypePreset { activityType = activityTypePreset }
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
             if let s = timer.payloadObject["start"] as? String, let d = APIDate.parse(s) { start = d }
@@ -896,6 +1016,11 @@ struct EntityEditorView: View {
             fromStash = p["from_stash"] as? Bool ?? false
         }
         if let a = p["amount"] as? Double { amount = trimmed(a) }
+        if kind == .activity {
+            activityType = p["type"] as? Int
+            // A type without duration shows its one moment, its start, as the time.
+            time = parseDate("start") ?? time
+        }
         wet = p["wet"] as? Bool ?? wet
         solid = p["solid"] as? Bool ?? solid
         if let c = p["color"] as? String { color = DiaperColor(rawValue: c) }
@@ -972,6 +1097,22 @@ struct EntityEditorView: View {
         dismiss()
     }
 
+    /// A new activity of a type with duration, which can be timed instead.
+    private var timedActivityType: ActivitiesCapability.TypeInfo? {
+        guard kind == .activity, !isEditing, !isConverting, let activityType else { return nil }
+        return activityTypeRecords.lazy.compactMap(ActivitiesCapability.TypeInfo.init)
+            .first { $0.id == activityType && $0.hasDuration }
+    }
+
+    /// Begin timing this activity type instead, from the form's start.
+    private func startTimer(_ type: ActivitiesCapability.TypeInfo) {
+        LocalRepository(context: context).startActivityTimer(type, child: childID, start: start, name: type.name)
+        Analytics.timerStarted(activity: "activity", source: .app)
+        Task { await sync.sync() }
+        Task { await liveActivity.reconcile() }
+        dismiss()
+    }
+
     private func delete() {
         guard let entity else { return }
         LocalRepository(context: context).delete(entity)
@@ -1030,12 +1171,28 @@ struct EntityEditorView: View {
             p["time"] = iso(time); p["kind"] = stashKind.rawValue
             p["amount"] = ActivityDraft.number(amount) ?? 0
             p["notes"] = notes; p["tags"] = tagList
-        case .timer, .child:
+        case .activity:
+            guard let activityType else { break }
+            p = Self.activityPayload(child: selectedChildID, type: activityType,
+                                     hasDuration: activityHasDuration, start: start, end: end,
+                                     time: time, notes: notes, tags: tagList)
+        case .timer, .child, .activityType:
             break
         }
         // Preserve the server id when editing so the payload round-trips.
         if let id = entity?.serverID { p["id"] = id }
         return p
+    }
+
+    /// An activity's payload. A type with duration has `start` to `end`; one without is the single
+    /// moment `time`, sent as both, which is how the server stores it.
+    static func activityPayload(child: Int, type: Int, hasDuration: Bool, start: Date, end: Date,
+                                time: Date, notes: String, tags: [String]) -> [String: Any] {
+        let iso = APIDate.isoDateTime
+        return ["child": child, "type": type,
+                "start": iso.string(from: hasDuration ? start : time),
+                "end": iso.string(from: hasDuration ? end : time),
+                "notes": notes, "tags": tags]
     }
 
     /// The chosen next-dose interval in seconds; a blank or zero custom entry means none.

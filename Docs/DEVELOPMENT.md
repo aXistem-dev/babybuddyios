@@ -82,6 +82,8 @@ Pass these via `SIMCTL_CHILD_<NAME>` environment variables to `xcrun simctl laun
 | `BB_TIMER_ALERT_SECONDS=<n>` | Turn forgotten-timer alerts on and fire them `n` seconds after a timer starts, whatever Settings says |
 | `BB_DOSE_ALERT_SECONDS=<n>` | Turn medication reminders on and shorten every next-dose interval to `n` seconds (the editor's shortest is 4 h) |
 | `BB_SEED_STEADY_FEEDS=1` | With `BB_DEMO`, seed a feed every 3 hours around the clock for 5 days instead of the usual feeds, so the next-feed estimate shows at any time of day |
+| `BB_NO_ACTIVITIES=1` | With `BB_DEMO`, behave like a server without activities: no activity types, activities or activity UI |
+| `BB_ACTIVITY_TYPES_READONLY=1` | With `BB_DEMO`, a user who may not add, change or delete activity types: no Activity types screen |
 | `BB_TOAST_SECONDS=<n>` | Hold the undo toast open for `n` seconds instead of 5 |
 
 `BB_DEMO=1` is the fastest way to see the app without standing up a server — it seeds a child,
