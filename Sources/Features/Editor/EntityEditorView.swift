@@ -425,7 +425,7 @@ struct EntityEditorView: View {
                 BBCard(cornerRadius: BBRadius.tile) { fieldLabeled("Amount") { amountStepper } }
                 if StashCapability.isSupported {
                     BBCard(cornerRadius: BBRadius.tile, padding: 0) {
-                        toggleRow("Into the milk stash", isOn: $toStash)
+                        toggleRow("Store this milk", isOn: $toStash)
                     }
                 }
             }
@@ -563,7 +563,7 @@ struct EntityEditorView: View {
             }
             if canComeFromStash {
                 BBCard(cornerRadius: BBRadius.tile, padding: 0) {
-                    toggleRow("From the milk stash", isOn: $fromStash)
+                    toggleRow("From stored milk", isOn: $fromStash)
                 }
             }
         }
