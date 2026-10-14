@@ -604,7 +604,7 @@ struct DashboardView: View {
                 HStack(spacing: 12) {
                     ActivityTile(kind: .stashAdjustment, size: 40, glyph: 21)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Milk stash").font(.headline)
+                        Text("Stored milk").font(.headline)
                         if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
                     }
                     Spacer(minLength: 8)
@@ -616,7 +616,7 @@ struct DashboardView: View {
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(["Milk stash", balance, detail].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel(["Stored milk", balance, detail].compactMap { $0 }.joined(separator: ", "))
     }
 
     // MARK: Next dose
@@ -1010,7 +1010,7 @@ private struct AllActivitiesSheet: View {
                 HStack(spacing: 12) {
                     ActivityTile(kind: .stashAdjustment, size: 40, glyph: 21)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Milk stash").font(.subheadline.weight(.semibold))
+                        Text("Stored milk").font(.subheadline.weight(.semibold))
                         Text("Add, discard or throw away stored milk")
                             .font(.caption).foregroundStyle(.secondary)
                     }
