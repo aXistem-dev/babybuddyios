@@ -122,9 +122,7 @@ final class ActivityTypesModel {
 
     /// Drop this phone's copies of the activities of a deleted type.
     static func removeActivities(ofType id: Int, in context: ModelContext) {
-        let kind = EntityKind.activity.rawValue
-        let activities = (try? context.fetch(FetchDescriptor<LocalEntity>(
-            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let activities = LocalStore.fetch(kind: .activity, in: context)
         for activity in activities where activity.payloadObject["type"] as? Int == id { context.delete(activity) }
     }
 
@@ -168,9 +166,7 @@ final class ActivityTypesModel {
 
     private func finish(context: ModelContext, sync: SyncEngine) -> Bool {
         try? context.save()
-        let kind = EntityKind.activityType.rawValue
-        let types = (try? context.fetch(FetchDescriptor<LocalEntity>(
-            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let types = LocalStore.fetch(kind: .activityType, in: context)
         ActivitiesCapability.store(typesIn: types)
         status = .idle
         Task { await sync.sync() }

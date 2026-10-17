@@ -39,7 +39,8 @@ actor SyncActor {
             Analytics.error(network: "pull-unknown")
             return PullOutcome(error: error.localizedDescription, changed: changed)
         }
-        if await refreshActivities(client: client) { changed = true }
+        let root = await fetchRoot(client: client)
+        if refreshActivities(root: root) { changed = true }
         var serverError: APIError?   // last 5xx seen; surfaced only if *every* kind fails this way
         var pulledAnyKind = false
         for kind in EntityKind.syncedKinds {
@@ -84,19 +85,26 @@ actor SyncActor {
         return PullOutcome(error: nil, changed: changed)
     }
 
-    /// Refresh whether the server has activities (its API root lists the activity routes), before
-    /// the kinds are pulled, so a server without them isn't asked for routes it doesn't have. Never
-    /// fails the sync: a network or HTTP error keeps what was known. Returns whether it changed, so
-    /// the pull counts as a change and what shows activities refreshes.
-    private func refreshActivities(client: APIClient) async -> Bool {
-        let hadActivities = ActivitiesCapability.isSupported
+    /// The `GET /api/` root, which lists the routes this server has, so the optional ones are only
+    /// asked for when it has them. Nil when it can't be read: what was known then stays.
+    private func fetchRoot(client: APIClient) async -> Data? {
         do {
-            ActivitiesCapability.update(rootJSON: try await client.getRawPath(""))
+            return try await client.getRawPath("")
         } catch let error as APIError {
-            Analytics.report(error, context: "pull-activities")
+            Analytics.report(error, context: "pull-root")
         } catch {
-            Analytics.error(network: "pull-activities")
+            Analytics.error(network: "pull-root")
         }
+        return nil
+    }
+
+    /// Refresh whether the server has activities from its API root (nil: unread, so what was known
+    /// stays), before the kinds are pulled, so a server without them isn't asked for routes it
+    /// doesn't have. Returns whether it changed, so the pull counts as a change and what shows
+    /// activities refreshes.
+    private func refreshActivities(root: Data?) -> Bool {
+        let hadActivities = ActivitiesCapability.isSupported
+        if let root { ActivitiesCapability.update(rootJSON: root) }
         return ActivitiesCapability.isSupported != hadActivities
     }
 
@@ -107,9 +115,7 @@ actor SyncActor {
         guard ActivitiesCapability.isSupported else { return false }
         let before = ActivitiesCapability.types
         let permissions = ActivitiesCapability.permissions
-        let kind = EntityKind.activityType.rawValue
-        let types = (try? modelContext.fetch(FetchDescriptor<LocalEntity>(
-            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let types = LocalStore.fetch(kind: .activityType, in: modelContext)
         ActivitiesCapability.store(typesIn: types)
         // A failed request keeps the permissions this phone last had.
         if let page = try? await client.getRawPath(ActivitiesCapability.typeListPath) {

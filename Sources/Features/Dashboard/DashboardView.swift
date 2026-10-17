@@ -593,7 +593,7 @@ struct DashboardView: View {
 
     /// The cached activity types.
     private var activityTypes: [ActivitiesCapability.TypeInfo] {
-        activityTypeRecords.filter { $0.syncState != .pendingDelete }.compactMap(ActivitiesCapability.TypeInfo.init)
+        ActivitiesCapability.types(in: activityTypeRecords)
     }
 
     /// One tap in the Add Activity sheet: this type, which has no duration, for the selected child,
