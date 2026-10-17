@@ -40,6 +40,8 @@ enum ActivitiesCapability {
         var name: String
         var icon: String
         var emoji: String
+        /// The server's `#rrggbb` color; nil or blank for none, as in a cache written before colors.
+        var color: String?
         var hasDuration: Bool
         var active: Bool
         var order: Int
@@ -59,6 +61,7 @@ enum ActivitiesCapability {
             self.name = name.isEmpty ? "Activity" : name
             icon = p["icon"] as? String ?? ""
             emoji = p["emoji"] as? String ?? ""
+            color = p["color"] as? String
             hasDuration = p["has_duration"] as? Bool ?? false
             active = p["active"] as? Bool ?? true
             order = p["order"] as? Int ?? 0

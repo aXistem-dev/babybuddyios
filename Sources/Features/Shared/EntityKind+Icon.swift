@@ -31,6 +31,17 @@ extension EntityKind {
     }
 }
 
+extension ActivitiesCapability.TypeInfo {
+    /// The type's own color at 75% opacity, drawn in place of the activity color; nil for a type
+    /// without one, which keeps the activity color.
+    var tileColor: Color? { color.flatMap(Color.init(hex:))?.opacity(0.75) }
+}
+
+extension LocalEntity {
+    /// An activity's type color, drawn in place of its kind's color; nil for anything else.
+    var tileColor: Color? { activityType?.tileColor }
+}
+
 extension ActivityIcon {
     /// The icon at `size` points, decorative for VoiceOver like ``EntityKind/icon(_:)``. A glyph or
     /// symbol takes the foreground style; an emoji keeps its own colours.

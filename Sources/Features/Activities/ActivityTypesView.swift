@@ -77,7 +77,7 @@ struct ActivityTypesView: View {
         let details = [type.hasDuration ? "Start and end" : nil, type.active ? nil : "Inactive"].compactMap { $0 }
         return Button { editing = .existing(record) } label: {
             HStack(spacing: 12) {
-                ActivityTile(kind: .activity, size: 30, glyph: 17, icon: type.tileIcon)
+                ActivityTile(kind: .activity, size: 30, glyph: 17, color: type.tileColor, icon: type.tileIcon)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(type.name).font(.body).foregroundStyle(.primary)
                     if !details.isEmpty {

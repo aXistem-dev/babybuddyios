@@ -20,7 +20,8 @@ final class UndoToastCenter {
         let localID: UUID?
         /// Draws the activity tile; `nil` for a toast about something that isn't a record.
         let kind: EntityKind?
-        /// An activity type's icon, drawn in the tile instead of the glyph.
+        /// An activity type's color and icon, drawn in the tile instead of the kind's.
+        var color: Color? = nil
         var icon: ActivityIcon? = nil
         let title: String
         let subtitle: String?
@@ -48,7 +49,7 @@ final class UndoToastCenter {
     private var dismissal: Task<Void, Never>?
 
     func show(_ entity: LocalEntity) {
-        present(Item(localID: entity.localID, kind: entity.kind, icon: entity.tileIcon,
+        present(Item(localID: entity.localID, kind: entity.kind, color: entity.tileColor, icon: entity.tileIcon,
                      title: "Logged \(EntityFormatting.title(entity).lowercased())",
                      subtitle: EntityFormatting.subtitle(entity), revert: nil))
     }
@@ -107,7 +108,7 @@ struct UndoToastView: View {
         if let item = center.current {
             HStack(spacing: 11) {
                 if let kind = item.kind {
-                    ActivityTile(kind: kind, size: 34, glyph: 18, icon: item.icon)
+                    ActivityTile(kind: kind, size: 34, glyph: 18, color: item.color, icon: item.icon)
                 } else if let symbol = item.symbol {
                     Image(systemName: symbol)
                         .font(.system(size: 20, weight: .semibold))

@@ -15,7 +15,7 @@ struct ActivityTypePickGrid: View {
             SectionHeader("Activities")
             LazyVGrid(columns: columns, spacing: 12) {
                 ForEach(types) { type in
-                    ActivityPickTile(kind: .activity, title: type.name, icon: type.tileIcon,
+                    ActivityPickTile(kind: .activity, title: type.name, icon: type.tileIcon, color: type.tileColor,
                                      isSelected: selection == type.id) {
                         selection = (selection == type.id) ? nil : type.id
                         onPick()

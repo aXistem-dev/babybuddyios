@@ -1,3 +1,4 @@
+import SwiftUI
 import XCTest
 @testable import BabyBuddy
 
@@ -106,6 +107,47 @@ final class ActivitiesTests: XCTestCase {
         XCTAssertEqual(bath["end"] as? String, APIDate.isoDateTime.string(from: time))
     }
 
+    private func payloads(_ types: [ActivitiesCapability.TypeInfo], start: Date, end: Date,
+                          time: Date) -> [[String: Any]] {
+        EntityEditorView.activityPayloads(child: 2, types: types, start: start, end: end, time: time,
+                                          notes: "Park", tags: ["out"])
+    }
+
+    private func iso(_ date: Date) -> String { APIDate.isoDateTime.string(from: date) }
+
+    /// Several types, some with duration: one activity each, with the same child, notes and tags. The
+    /// types with duration run from the start to the end; the others are the moment of the start.
+    func testSeveralTypesMixed() {
+        let start = now.addingTimeInterval(-3600), end = now.addingTimeInterval(-1200)
+        let saved = payloads([info(1, "Bath"), info(4, "Walk", hasDuration: true), info(2, "Pajama change")],
+                             start: start, end: end, time: now)
+        XCTAssertEqual(saved.map { $0["type"] as? Int }, [1, 4, 2])
+        XCTAssertEqual(saved.map { $0["child"] as? Int }, [2, 2, 2])
+        XCTAssertEqual(saved.map { $0["notes"] as? String }, ["Park", "Park", "Park"])
+        XCTAssertEqual(saved.map { $0["tags"] as? [String] }, [["out"], ["out"], ["out"]])
+        XCTAssertEqual(saved.map { $0["start"] as? String }, [iso(start), iso(start), iso(start)])
+        XCTAssertEqual(saved.map { $0["end"] as? String }, [iso(start), iso(end), iso(start)])
+    }
+
+    /// Several types without duration: each is the one time, and none gets the end.
+    func testSeveralTypesWithoutDuration() {
+        let start = now.addingTimeInterval(-3600), end = now.addingTimeInterval(-1200)
+        let saved = payloads([info(1, "Bath"), info(2, "Pajama change")], start: start, end: end, time: now)
+        XCTAssertEqual(saved.map { $0["type"] as? Int }, [1, 2])
+        XCTAssertEqual(saved.map { $0["start"] as? String }, [iso(now), iso(now)])
+        XCTAssertEqual(saved.map { $0["end"] as? String }, [iso(now), iso(now)])
+    }
+
+    /// Several types with duration: each runs from the start to the end.
+    func testSeveralTypesWithDuration() {
+        let start = now.addingTimeInterval(-3600), end = now.addingTimeInterval(-1200)
+        let saved = payloads([info(4, "Walk", hasDuration: true), info(6, "Swim", hasDuration: true)],
+                             start: start, end: end, time: now)
+        XCTAssertEqual(saved.map { $0["type"] as? Int }, [4, 6])
+        XCTAssertEqual(saved.map { $0["start"] as? String }, [iso(start), iso(start)])
+        XCTAssertEqual(saved.map { $0["end"] as? String }, [iso(end), iso(end)])
+    }
+
     // MARK: Validation
 
     /// An activity needs a type. One without duration is one time, never in the future; one with
@@ -157,8 +199,8 @@ final class ActivitiesTests: XCTestCase {
         let records = [type(1, "Walk", order: 2), type(2, "Bath", order: 1),
                        type(3, "Old", active: false, order: 0),
                        type(4, "Gone", order: 0, state: .pendingDelete)]
-        XCTAssertEqual(EntityEditorView.activityTypeChoices(records, keeping: nil).map(\.name), ["Bath", "Walk"])
-        XCTAssertEqual(EntityEditorView.activityTypeChoices(records, keeping: 3).map(\.name), ["Old", "Bath", "Walk"])
+        XCTAssertEqual(EntityEditorView.activityTypeChoices(records, keeping: []).map(\.name), ["Bath", "Walk"])
+        XCTAssertEqual(EntityEditorView.activityTypeChoices(records, keeping: [3]).map(\.name), ["Old", "Bath", "Walk"])
     }
 
     /// The emoji first; else the app's own glyph where the server's icon is a record kind; else an
@@ -219,6 +261,7 @@ final class ActivitiesTests: XCTestCase {
         XCTAssertEqual(EntityFormatting.title(bath), "Bath")
         XCTAssertEqual(EntityFormatting.subtitle(bath), "Before bed", "A moment has no duration")
         XCTAssertEqual(bath.tileIcon, .emoji("🛁"))
+        XCTAssertNotNil(bath.tileColor)
 
         let walk = activity(4, start: 60, minutes: 40)
         XCTAssertEqual(EntityFormatting.title(walk), "Walk")
@@ -227,13 +270,40 @@ final class ActivitiesTests: XCTestCase {
         let unknown = activity(99, start: 60)
         XCTAssertEqual(EntityFormatting.title(unknown), "Activity", "A type this phone hasn't synced")
         XCTAssertNil(unknown.tileIcon)
+        XCTAssertNil(unknown.tileColor)
         XCTAssertEqual(EntityFormatting.title(entity(.note, ["child": 1, "time": iso(1)])), "Note")
+    }
+
+    // MARK: Colors
+
+    /// A type's tile takes the server's color at 75% opacity; without one, or with one that isn't
+    /// `#rrggbb`, it keeps the activity color.
+    func testTypeColor() throws {
+        let bath = ActivitiesCapability.TypeInfo(id: 1, payload: ["name": "Bath", "color": "#8455b8"])
+        XCTAssertEqual(bath.color, "#8455b8")
+        let resolved = try XCTUnwrap(bath.tileColor).resolve(in: EnvironmentValues())
+        XCTAssertEqual(resolved.opacity, 0.75, accuracy: 0.001)
+        XCTAssertEqual(resolved.red, Color(hex: "#8455b8")!.resolve(in: EnvironmentValues()).red, accuracy: 0.001)
+
+        XCTAssertNil(ActivitiesCapability.TypeInfo(id: 2, payload: ["name": "Walk", "color": ""]).tileColor)
+        XCTAssertNil(ActivitiesCapability.TypeInfo(id: 3, payload: ["name": "Walk", "color": "purple"]).tileColor)
+        XCTAssertNil(ActivitiesCapability.TypeInfo(id: 4, payload: ["name": "Walk"]).tileColor)
+    }
+
+    /// Types cached before colors still read, without a color.
+    func testTypesCachedWithoutAColor() {
+        let cached = Data(#"[{"id":1,"name":"Bath","icon":"","emoji":"🛁","hasDuration":false,"active":true,"order":1}]"#.utf8)
+        let types = ActivitiesCapability.types(from: cached)
+        XCTAssertEqual(types.map(\.name), ["Bath"])
+        XCTAssertNil(types.first?.color)
     }
 
     // MARK: Most used
 
-    private func info(_ id: Int, _ name: String, active: Bool = true, order: Int = 0) -> ActivitiesCapability.TypeInfo {
-        ActivitiesCapability.TypeInfo(id: id, payload: ["name": name, "active": active, "order": order])
+    private func info(_ id: Int, _ name: String, hasDuration: Bool = false, active: Bool = true,
+                      order: Int = 0) -> ActivitiesCapability.TypeInfo {
+        ActivitiesCapability.TypeInfo(id: id, payload: ["name": name, "has_duration": hasDuration,
+                                                        "active": active, "order": order])
     }
 
     /// The child's most used active types in the last 30 days first; a tie goes to the type used most
