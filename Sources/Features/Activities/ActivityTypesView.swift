@@ -17,10 +17,10 @@ struct ActivityTypesView: View {
 
     /// The types in the server's order; ones being deleted are left out.
     private var types: [(record: LocalEntity, info: ActivitiesCapability.TypeInfo)] {
-        let pairs = records.filter { $0.syncState != .pendingDelete }
-            .compactMap { record in ActivitiesCapability.TypeInfo(record).map { (record, $0) } }
-        let order = ActivitiesCapability.sorted(pairs.map(\.1)).map(\.id)
-        return pairs.sorted { (order.firstIndex(of: $0.1.id) ?? 0) < (order.firstIndex(of: $1.1.id) ?? 0) }
+        let byID = Dictionary(records.filter { $0.syncState != .pendingDelete }.compactMap { record in
+            record.serverID.map { ($0, record) }
+        }, uniquingKeysWith: { first, _ in first })
+        return ActivitiesCapability.types(in: records).compactMap { info in byID[info.id].map { ($0, info) } }
     }
 
     var body: some View {

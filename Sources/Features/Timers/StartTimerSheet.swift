@@ -5,8 +5,8 @@ import SwiftData
 /// "−5 / −15 / −30 min" chips or the start picker, for the nap noticed late. Pick an activity from the
 /// grid and the timer remembers it, so stopping it later files straight to that record with no
 /// "convert to…?" step — an activity type with duration too, on a server with activities; or start
-/// an uncategorized timer with the quiet escape hatch. Created
-/// through ``LocalRepository`` like any record, so it works offline and syncs when reconnected.
+/// an uncategorized timer with the quiet escape hatch. Created through ``LocalRepository`` like any
+/// record, so it works offline and syncs when reconnected.
 struct StartTimerSheet: View {
     @Environment(\.modelContext) private var context
     @Environment(SyncEngine.self) private var sync
@@ -43,18 +43,7 @@ struct StartTimerSheet: View {
                             }
                         }
                     }
-                    if !timedTypes.isEmpty {
-                        SectionHeader("Activities")
-                        LazyVGrid(columns: columns, spacing: 12) {
-                            ForEach(timedTypes) { type in
-                                ActivityPickTile(kind: .activity, title: type.name, icon: type.tileIcon,
-                                                 isSelected: selectedType == type.id) {
-                                    selectedType = (selectedType == type.id) ? nil : type.id
-                                    selected = nil
-                                }
-                            }
-                        }
-                    }
+                    ActivityTypePickGrid(types: timedTypes, selection: $selectedType) { selected = nil }
                 } trailing: {
                     detailsCard
                     Text("The timer counts up from its start until you stop it.")
@@ -86,9 +75,7 @@ struct StartTimerSheet: View {
     /// The active activity types with duration, which a timer can time, in the server's order.
     private var timedTypes: [ActivitiesCapability.TypeInfo] {
         guard ActivitiesCapability.isSupported else { return [] }
-        let types = activityTypeRecords.filter { $0.syncState != .pendingDelete }
-            .compactMap(ActivitiesCapability.TypeInfo.init)
-        return ActivitiesCapability.sorted(types.filter { $0.active && $0.hasDuration })
+        return ActivitiesCapability.types(in: activityTypeRecords).filter { $0.active && $0.hasDuration }
     }
 
     private var pickedType: ActivitiesCapability.TypeInfo? {

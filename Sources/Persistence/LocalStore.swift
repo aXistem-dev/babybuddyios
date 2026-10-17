@@ -99,6 +99,12 @@ enum LocalStore {
         return try? context.fetch(descriptor).first
     }
 
+    /// Every cached record of `kind`.
+    static func fetch(kind: EntityKind, in context: ModelContext) -> [LocalEntity] {
+        let kindRaw = kind.rawValue
+        return (try? context.fetch(FetchDescriptor<LocalEntity>(predicate: #Predicate { $0.kindRaw == kindRaw }))) ?? []
+    }
+
     static func fetch(localID: UUID, in context: ModelContext) -> LocalEntity? {
         var descriptor = FetchDescriptor<LocalEntity>(
             predicate: #Predicate { $0.localID == localID })

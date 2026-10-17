@@ -75,10 +75,16 @@ enum ActivitiesCapability {
     /// The cached type with this id; nil for a type this phone hasn't synced.
     static func type(id: Int) -> TypeInfo? { types.first { $0.id == id } }
 
+    /// The activity types among `entities` (cached records), in the server's order; types being
+    /// deleted are left out.
+    static func types(in entities: [LocalEntity]) -> [TypeInfo] {
+        sorted(entities.filter { $0.syncState != .pendingDelete }.compactMap(TypeInfo.init))
+    }
+
     /// Cache the activity types in `entities` (the cached `.activityType` records); types being
     /// deleted are left out.
     static func store(typesIn entities: [LocalEntity]) {
-        let infos = sorted(entities.filter { $0.syncState != .pendingDelete }.compactMap(TypeInfo.init))
+        let infos = types(in: entities)
         if infos.isEmpty {
             SharedDefaults.suite.removeObject(forKey: typesKey)
         } else if let data = try? JSONEncoder().encode(infos) {
