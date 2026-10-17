@@ -40,7 +40,8 @@ actor SyncActor {
             return PullOutcome(error: error.localizedDescription, changed: changed)
         }
         // First, so the kinds below know whether to pull milk stash entries.
-        if await refreshStash(client: client) { changed = true }
+        let root = await fetchRoot(client: client)
+        if await refreshStash(root: root, client: client) { changed = true }
         if await refreshActivities(client: client) { changed = true }
         var serverError: APIError?   // last 5xx seen; surfaced only if *every* kind fails this way
         var pulledAnyKind = false
@@ -86,14 +87,27 @@ actor SyncActor {
         return PullOutcome(error: nil, changed: changed)
     }
 
+    /// The `GET /api/` root, which lists the routes this server has, so the optional ones are only
+    /// asked for when it has them. Nil when it can't be read: what was known then stays.
+    private func fetchRoot(client: APIClient) async -> Data? {
+        do {
+            return try await client.getRawPath("")
+        } catch let error as APIError {
+            Analytics.report(error, context: "pull-root")
+        } catch {
+            Analytics.error(network: "pull-root")
+        }
+        return nil
+    }
+
     /// Refresh whether the server has the milk stash for this user (its API root lists the stash
-    /// routes, and the stash answers) and the cached summary. Never fails the sync: a network or
-    /// server error keeps what was cached. Returns whether either changed, so what shows the stash
-    /// refreshes.
-    private func refreshStash(client: APIClient) async -> Bool {
+    /// routes, and the stash answers) and the cached summary. Never fails the sync: an unread root
+    /// (nil), or a network or server error, keeps what was cached. Returns whether either changed,
+    /// so what shows the stash refreshes.
+    private func refreshStash(root: Data?, client: APIClient) async -> Bool {
+        guard let root else { return false }
         let previous = StashCapability.summary
         do {
-            let root = try await client.getRawPath("")
             if StashCapability.listsStash(rootJSON: root) {
                 let data = try await client.getRawPath("stash")
                 StashCapability.store(summary: try APICoders.decoder.decode(StashSummaryDTO.self, from: data))

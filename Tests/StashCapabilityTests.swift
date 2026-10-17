@@ -33,6 +33,19 @@ final class StashCapabilityTests: XCTestCase {
         XCTAssertEqual(summary.lots.first?.status, .warn)
     }
 
+    /// The app works out the status and the expired milk from the lots, so a summary without the
+    /// server's own figures still reads.
+    func testDecodesASummaryWithoutTheServersFigures() throws {
+        let summary = try APICoders.decoder.decode(StashSummaryDTO.self, from: Data("""
+        {"balance": 80.0,
+         "lots": [{"time": "2026-10-10T08:00:00+02:00", "amount": 80.0,
+                   "warn_at": "2026-10-12T08:00:00+02:00", "expires_at": "2026-10-13T08:00:00+02:00"}]}
+        """.utf8))
+        let after = try XCTUnwrap(APIDate.parse("2026-10-14T08:00:00+02:00"))
+        XCTAssertEqual(summary.status(at: after), .expired)
+        XCTAssertEqual(summary.expiredAmount(at: after), 80)
+    }
+
     func testDetectsTheStashFromTheAPIRoot() {
         XCTAssertTrue(StashCapability.listsStash(rootJSON: Data(
             #"{"feedings": "x", "stash-adjustments": "x", "stash": "x"}"#.utf8)))
