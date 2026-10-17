@@ -159,9 +159,7 @@ enum DemoData {
     /// made from its name, as the server makes them.
     @MainActor
     static func createDemoActivityType(_ body: [String: Any], in context: ModelContext) {
-        let kind = EntityKind.activityType.rawValue
-        let types = (try? context.fetch(FetchDescriptor<LocalEntity>(
-            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let types = LocalStore.fetch(kind: .activityType, in: context)
         let id = (types.compactMap(\.serverID).max() ?? 0) + 1
         let name = body["name"] as? String ?? ""
         let slug = name.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
@@ -187,9 +185,7 @@ enum DemoData {
     @MainActor
     static func deleteDemoActivityType(_ type: LocalEntity, in context: ModelContext) throws {
         let id = type.serverID
-        let kind = EntityKind.activity.rawValue
-        let activities = (try? context.fetch(FetchDescriptor<LocalEntity>(
-            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let activities = LocalStore.fetch(kind: .activity, in: context)
         let count = activities.filter { $0.payloadObject["type"] as? Int == id }.count
         if count > 0 {
             throw DeleteConflict(message: "This activity type is used by activities and can not be deleted.",
@@ -209,9 +205,7 @@ enum DemoData {
             return
         }
         ActivitiesCapability.update(rootJSON: Data(#"{"activity-types":"x","activities":"x"}"#.utf8))
-        let kind = EntityKind.activityType.rawValue
-        let types = (try? context.fetch(FetchDescriptor<LocalEntity>(
-            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let types = LocalStore.fetch(kind: .activityType, in: context)
         ActivitiesCapability.store(typesIn: types)
         let manages = ProcessInfo.processInfo.environment["BB_ACTIVITY_TYPES_READONLY"] != "1"
         ActivitiesCapability.store(permissions: .init(add: manages, change: manages, delete: manages,

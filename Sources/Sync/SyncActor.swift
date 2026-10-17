@@ -42,7 +42,7 @@ actor SyncActor {
         // First, so the kinds below know whether to pull milk stash entries.
         let root = await fetchRoot(client: client)
         if await refreshStash(root: root, client: client) { changed = true }
-        if await refreshActivities(client: client) { changed = true }
+        if refreshActivities(root: root) { changed = true }
         var serverError: APIError?   // last 5xx seen; surfaced only if *every* kind fails this way
         var pulledAnyKind = false
         for kind in EntityKind.syncedKinds {
@@ -128,19 +128,13 @@ actor SyncActor {
         return StashCapability.summary != previous
     }
 
-    /// Refresh whether the server has activities (its API root lists the activity routes), before
-    /// the kinds are pulled, so a server without them isn't asked for routes it doesn't have. Never
-    /// fails the sync: a network or HTTP error keeps what was known. Returns whether it changed, so
-    /// the pull counts as a change and what shows activities refreshes.
-    private func refreshActivities(client: APIClient) async -> Bool {
+    /// Refresh whether the server has activities from its API root (nil: unread, so what was known
+    /// stays), before the kinds are pulled, so a server without them isn't asked for routes it
+    /// doesn't have. Returns whether it changed, so the pull counts as a change and what shows
+    /// activities refreshes.
+    private func refreshActivities(root: Data?) -> Bool {
         let hadActivities = ActivitiesCapability.isSupported
-        do {
-            ActivitiesCapability.update(rootJSON: try await client.getRawPath(""))
-        } catch let error as APIError {
-            Analytics.report(error, context: "pull-activities")
-        } catch {
-            Analytics.error(network: "pull-activities")
-        }
+        if let root { ActivitiesCapability.update(rootJSON: root) }
         return ActivitiesCapability.isSupported != hadActivities
     }
 

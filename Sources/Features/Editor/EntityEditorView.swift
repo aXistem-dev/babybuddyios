@@ -529,23 +529,17 @@ struct EntityEditorView: View {
     }
 
     static func activityTypeChoices(_ records: [LocalEntity], keeping current: Int?) -> [ActivitiesCapability.TypeInfo] {
-        let types = records.filter { $0.syncState != .pendingDelete }.compactMap(ActivitiesCapability.TypeInfo.init)
-        return ActivitiesCapability.sorted(types.filter { $0.active || $0.id == current })
+        ActivitiesCapability.types(in: records).filter { $0.active || $0.id == current }
+    }
+
+    /// The chosen activity type, as cached.
+    private var chosenActivityType: ActivitiesCapability.TypeInfo? {
+        guard let activityType else { return nil }
+        return activityTypeRecords.lazy.compactMap(ActivitiesCapability.TypeInfo.init).first { $0.id == activityType }
     }
 
     /// Whether the chosen activity type tracks duration.
-    private var activityHasDuration: Bool {
-        guard let activityType else { return false }
-        return activityTypeRecords.lazy.compactMap(ActivitiesCapability.TypeInfo.init)
-            .first { $0.id == activityType }?.hasDuration ?? false
-    }
-
-    /// The chosen activity type's name, for the overlap warning.
-    private var activityTypeName: String? {
-        guard let activityType else { return nil }
-        return activityTypeRecords.lazy.compactMap(ActivitiesCapability.TypeInfo.init)
-            .first { $0.id == activityType }?.name
-    }
+    private var activityHasDuration: Bool { chosenActivityType?.hasDuration ?? false }
 
     private var feedingDetails: some View {
         VStack(spacing: 12) {
@@ -886,7 +880,7 @@ struct EntityEditorView: View {
     /// the other entry afterwards.
     @ViewBuilder private var overlapWarning: some View {
         if let other = overlappingRecord, let period = ActivityDraft.period(of: other) {
-            let name = (kind == .activity ? activityTypeName : nil) ?? kind.displayName
+            let name = (kind == .activity ? chosenActivityType?.name : nil) ?? kind.displayName
             let message = "Overlaps the \(period.formatted(.interval.hour().minute())) \(name.lowercased()). Baby Buddy won\u{2019}t accept both."
             warningNotice(message, accessibilityLabel: "Warning. \(message)")
         }
@@ -1099,9 +1093,9 @@ struct EntityEditorView: View {
 
     /// A new activity of a type with duration, which can be timed instead.
     private var timedActivityType: ActivitiesCapability.TypeInfo? {
-        guard kind == .activity, !isEditing, !isConverting, let activityType else { return nil }
-        return activityTypeRecords.lazy.compactMap(ActivitiesCapability.TypeInfo.init)
-            .first { $0.id == activityType && $0.hasDuration }
+        guard kind == .activity, !isEditing, !isConverting, let type = chosenActivityType, type.hasDuration
+        else { return nil }
+        return type
     }
 
     /// Begin timing this activity type instead, from the form's start.

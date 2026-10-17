@@ -42,9 +42,10 @@ enum ActivityProblem: Equatable {
 /// for sleep/tummy time, `validate_duration` (start ≤ end, ≤ 24h) for all four, `validate_time(time)`
 /// for changes/temperature/medication (notes are exempt upstream), and `validate_date(date)` for the
 /// growth measurements, and for activities `validate_time(start)` and `(end)` with
-/// `validate_duration` (a type without duration has its end at its start). Overlap (`validate_unique_period`) is not a block here: the local cache is
-/// windowed and can be stale, so a local check would be wrong in both directions. The editor shows
-/// ``overlapping(kind:childID:start:end:excluding:in:)`` as a warning instead.
+/// `validate_duration` (a type without duration has its end at its start). Overlap
+/// (`validate_unique_period`) is not a block here: the local cache is windowed and can be stale, so
+/// a local check would be wrong in both directions. The editor shows
+/// ``overlapping(kind:childID:start:end:excluding:activityType:in:)`` as a warning instead.
 struct ActivityDraft {
     var kind: EntityKind
     var start = Date()

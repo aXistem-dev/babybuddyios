@@ -55,18 +55,7 @@ struct StopTimerSheet: View {
                             }
                         }
                     }
-                    if !timedTypes.isEmpty {
-                        SectionHeader("Activities")
-                        LazyVGrid(columns: columns, spacing: 12) {
-                            ForEach(timedTypes) { type in
-                                ActivityPickTile(kind: .activity, title: type.name, icon: type.tileIcon,
-                                                 isSelected: selectedType == type.id) {
-                                    selectedType = (selectedType == type.id) ? nil : type.id
-                                    selected = nil
-                                }
-                            }
-                        }
-                    }
+                    ActivityTypePickGrid(types: timedTypes, selection: $selectedType) { selected = nil }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -112,10 +101,9 @@ struct StopTimerSheet: View {
     /// timer was started for even if it's inactive now.
     private var timedTypes: [ActivitiesCapability.TypeInfo] {
         guard ActivitiesCapability.isSupported else { return [] }
-        let types = activityTypeRecords.filter { $0.syncState != .pendingDelete }
-            .compactMap(ActivitiesCapability.TypeInfo.init)
         let started = ActivitiesCapability.timerType(of: timer)?.id
-        return ActivitiesCapability.sorted(types.filter { $0.hasDuration && ($0.active || $0.id == started) })
+        return ActivitiesCapability.types(in: activityTypeRecords)
+            .filter { $0.hasDuration && ($0.active || $0.id == started) }
     }
 
     private var pickedType: ActivitiesCapability.TypeInfo? {
