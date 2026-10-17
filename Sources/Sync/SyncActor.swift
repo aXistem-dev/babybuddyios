@@ -145,9 +145,7 @@ actor SyncActor {
         guard ActivitiesCapability.isSupported else { return false }
         let before = ActivitiesCapability.types
         let permissions = ActivitiesCapability.permissions
-        let kind = EntityKind.activityType.rawValue
-        let types = (try? modelContext.fetch(FetchDescriptor<LocalEntity>(
-            predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        let types = LocalStore.fetch(kind: .activityType, in: modelContext)
         ActivitiesCapability.store(typesIn: types)
         // A failed request keeps the permissions this phone last had.
         if let page = try? await client.getRawPath(ActivitiesCapability.typeListPath) {
