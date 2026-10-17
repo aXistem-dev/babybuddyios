@@ -255,8 +255,9 @@ struct StashLotDTO: Codable, Equatable {
     var amount: Double
     var warn_at: Date
     var expires_at: Date
-    /// The server's status when the summary was made; ``status(at:)`` is current.
-    var status: StashStatus
+    /// The server's status when the summary was made; ``status(at:)`` is current, and is what the
+    /// app shows.
+    var status: StashStatus?
     /// The movement in that this lot is what's left of; absent on a server from before it.
     var source: StashLotSourceDTO? = nil
 
@@ -280,10 +281,12 @@ struct StashLotSourceDTO: Codable, Equatable {
 struct StashSummaryDTO: Codable, Equatable {
     /// Below zero when more was taken out than was put in; the lots are empty then.
     var balance: Double
-    var status: StashStatus
-    var warn_age_hours: Double
-    var max_age_hours: Double
-    var expired_amount: Double
+    /// The server's figures when the summary was made. The app works out its own from the lots
+    /// (``status(at:)``, ``expiredAmount(at:)``), so a summary without them still reads.
+    var status: StashStatus?
+    var warn_age_hours: Double?
+    var max_age_hours: Double?
+    var expired_amount: Double?
     /// Oldest first.
     var lots: [StashLotDTO]
 
