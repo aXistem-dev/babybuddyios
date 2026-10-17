@@ -229,10 +229,11 @@ enum StashAgePolicy {
 }
 
 /// Keeps the app's local notifications in step with the shared store: forgotten-timer alerts,
-/// medication next-dose reminders, sick mode's temperature checks and the milk stash's expiry alerts. Mirrors
-/// ``LiveActivityManager``: one idempotent ``reconcile()`` that ``LiveActivityManager/reconcile()``
-/// calls, so every timer start/stop/discard, editor save/delete and app foreground already covers
-/// it; ``SyncEngine`` adds a pull that brought changes (a dose logged on the web).
+/// medication next-dose reminders, sick mode's temperature checks and the milk stash's expiry
+/// alerts. Mirrors ``LiveActivityManager``: one idempotent ``reconcile()`` that
+/// ``LiveActivityManager/reconcile()`` calls, so every timer start/stop/discard, editor save/delete
+/// and app foreground already covers it; ``SyncEngine`` adds a pull that brought changes (a dose
+/// logged on the web).
 @MainActor
 final class LocalAlerts {
     static let shared = LocalAlerts()
