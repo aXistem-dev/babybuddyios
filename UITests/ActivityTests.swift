@@ -111,6 +111,7 @@ final class ActivityTests: UITestCase {
         expect(app.staticTexts["Start"])
         expect(app.staticTexts["End"])
         XCTAssertFalse(app.staticTexts["Time"].exists)
+        tap(app.buttons["Walk"]) // unpicked
         tap(app.buttons["Bath"])
         expect(app.staticTexts["Time"])
         XCTAssertFalse(app.staticTexts["End"].exists)
@@ -120,7 +121,42 @@ final class ActivityTests: UITestCase {
         expect(element(labeled: "Walk, 40m"))
     }
 
-    /// An activity opens in the editor on its own type, at its one time.
+    /// A new activity can be several types at once, saved as one activity each with the same time
+    /// and notes. The End row shows only while a picked type tracks duration.
+    func testLogSeveralActivitiesAtOnce() {
+        launch()
+        openActivityEditor()
+        let bar = expect(app.navigationBars["New Activity"])
+        tap(app.buttons["Bath"])
+        tap(app.buttons["Pajama change"])
+        XCTAssertTrue(app.buttons["Bath"].isSelected)
+        XCTAssertTrue(app.buttons["Pajama change"].isSelected)
+        expect(app.staticTexts["Time"])
+        XCTAssertFalse(app.staticTexts["End"].exists)
+
+        tap(app.buttons["Walk"])
+        expect(app.staticTexts["End"])
+        XCTAssertFalse(app.buttons["Start timer instead"].exists, "Only one type can be timed")
+        tap(app.buttons["Walk"]) // unpicked
+        expectGone(app.staticTexts["End"])
+
+        let notes = elements("placeholderValue == 'Add a note\u{2026}'").firstMatch
+        tap(notes)
+        notes.typeText("Bedtime")
+        tap(bar.buttons["Save"])
+        expectGone(bar)
+        expect(element(labeled: "Logged 2 activities"))
+
+        tap(app.tabBars.buttons["Timeline"])
+        let search = app.searchFields.firstMatch
+        tap(search)
+        search.typeText("Bedtime")
+        expect(element(labeled: "Bath, Bedtime, "))
+        expect(element(labeled: "Pajama change, Bedtime, "))
+    }
+
+    /// An activity opens in the editor on its own type, at its one time. It stays one type: picking
+    /// another replaces it.
     func testEditKeepsItsType() {
         launch()
         tap(app.tabBars.buttons["Timeline"])
@@ -129,6 +165,9 @@ final class ActivityTests: UITestCase {
         XCTAssertTrue(app.buttons["Bodysuit change"].isSelected)
         XCTAssertFalse(app.buttons["Bath"].isSelected)
         expect(app.staticTexts["Time"])
+        tap(app.buttons["Bath"])
+        XCTAssertTrue(app.buttons["Bath"].isSelected)
+        XCTAssertFalse(app.buttons["Bodysuit change"].isSelected)
     }
 
     /// A server without activities: nothing to log, and no activities on the timeline.
@@ -292,6 +331,7 @@ final class ActivityTests: UITestCase {
         openActivityEditor()
         tap(app.buttons["Bath"])
         XCTAssertFalse(app.buttons["Start timer instead"].exists, "A moment can't be timed")
+        tap(app.buttons["Bath"]) // unpicked
         tap(app.buttons["Walk"])
         tap(app.buttons["Start timer instead"])
         expectGone(app.navigationBars["New Activity"])

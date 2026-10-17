@@ -1035,7 +1035,7 @@ private struct AllActivitiesSheet: View {
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(activityTypes) { type in
                     Button { onLogActivity(type) } label: {
-                        tileLabel(Text(type.name), icon: type.tileIcon)
+                        tileLabel(Text(type.name), icon: type.tileIcon, color: type.tileColor)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Log \(type.name)")
@@ -1050,9 +1050,9 @@ private struct AllActivitiesSheet: View {
         }
     }
 
-    private func tileLabel(_ title: Text, icon: ActivityIcon? = nil) -> some View {
+    private func tileLabel(_ title: Text, icon: ActivityIcon? = nil, color: Color? = nil) -> some View {
         VStack(spacing: 7) {
-            ActivityTile(kind: .activity, size: 56, glyph: 27, icon: icon)
+            ActivityTile(kind: .activity, size: 56, glyph: 27, color: color, icon: icon)
             title.font(.caption).foregroundStyle(.secondary).lineLimit(1)
         }
         .frame(maxWidth: .infinity)

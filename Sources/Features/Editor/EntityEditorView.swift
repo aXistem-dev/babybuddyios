@@ -89,8 +89,9 @@ struct EntityEditorView: View {
     @State private var doseInterval: DoseInterval = .none
     @State private var customDoseHours = ""
     @State private var customDoseMinutes = ""
-    // Activity, on a server with activities: the chosen activity type's id.
-    @State private var activityType: Int?
+    // Activity, on a server with activities: the chosen activity types' ids. One when editing or
+    // converting a timer; any number for a new activity, which saves one activity per type.
+    @State private var activityTypeIDs: Set<Int> = []
 
     /// Every cached dose, so a dose synced in while the editor is open still raises the warning.
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" }) private var medications: [LocalEntity]
@@ -437,8 +438,9 @@ struct EntityEditorView: View {
         }
     }
 
-    /// What was done: a row per active activity type, in the server's order. The type decides the
-    /// When card: one time, or a start and an end for a type that tracks duration.
+    /// What was done: a row per active activity type, in the server's order. A new activity can pick
+    /// several, saved as one activity each. The types decide the When card: one time, or a start and
+    /// an end once any of them tracks duration.
     private var activityTypePicker: some View {
         let choices = activityTypeChoices
         return BBCard(cornerRadius: BBRadius.tile, padding: 0) {
@@ -473,12 +475,18 @@ struct EntityEditorView: View {
     }
 
     private func activityTypeRow(_ type: ActivitiesCapability.TypeInfo) -> some View {
-        let selected = activityType == type.id
+        let selected = activityTypeIDs.contains(type.id)
         return Button {
-            activityType = type.id
+            if !allowsSeveralActivityTypes {
+                activityTypeIDs = [type.id]
+            } else if selected {
+                activityTypeIDs.remove(type.id)
+            } else {
+                activityTypeIDs.insert(type.id)
+            }
         } label: {
             HStack(spacing: 12) {
-                ActivityTile(kind: .activity, size: 30, glyph: 17, icon: type.tileIcon)
+                ActivityTile(kind: .activity, size: 30, glyph: 17, color: type.tileColor, icon: type.tileIcon)
                 Text(type.name).font(.body).foregroundStyle(.primary)
                 Spacer(minLength: 8)
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
@@ -495,21 +503,29 @@ struct EntityEditorView: View {
 
     /// The active activity types, and an edited activity's own type even when it's inactive.
     private var activityTypeChoices: [ActivitiesCapability.TypeInfo] {
-        Self.activityTypeChoices(activityTypeRecords, keeping: activityType)
+        Self.activityTypeChoices(activityTypeRecords, keeping: activityTypeIDs)
     }
 
-    static func activityTypeChoices(_ records: [LocalEntity], keeping current: Int?) -> [ActivitiesCapability.TypeInfo] {
-        ActivitiesCapability.types(in: records).filter { $0.active || $0.id == current }
+    static func activityTypeChoices(_ records: [LocalEntity], keeping chosen: Set<Int>) -> [ActivitiesCapability.TypeInfo] {
+        ActivitiesCapability.types(in: records).filter { $0.active || chosen.contains($0.id) }
     }
 
-    /// The chosen activity type, as cached.
+    /// Only a new activity: an edit changes one record, and a timer converts into one.
+    private var allowsSeveralActivityTypes: Bool { !isEditing && !isConverting }
+
+    /// The chosen activity types, as cached, in the server's order.
+    private var chosenActivityTypes: [ActivitiesCapability.TypeInfo] {
+        ActivitiesCapability.types(in: activityTypeRecords).filter { activityTypeIDs.contains($0.id) }
+    }
+
+    /// The chosen activity type, when exactly one is chosen.
     private var chosenActivityType: ActivitiesCapability.TypeInfo? {
-        guard let activityType else { return nil }
-        return activityTypeRecords.lazy.compactMap(ActivitiesCapability.TypeInfo.init).first { $0.id == activityType }
+        let chosen = chosenActivityTypes
+        return chosen.count == 1 ? chosen.first : nil
     }
 
-    /// Whether the chosen activity type tracks duration.
-    private var activityHasDuration: Bool { chosenActivityType?.hasDuration ?? false }
+    /// Whether any chosen activity type tracks duration.
+    private var activityHasDuration: Bool { chosenActivityTypes.contains(where: \.hasDuration) }
 
     private var feedingDetails: some View {
         BBCard(cornerRadius: BBRadius.tile) {
@@ -802,7 +818,7 @@ struct EntityEditorView: View {
         ActivityDraft(kind: kind, start: start, end: end, time: time, date: date,
                       amount: amount, value: value, dosage: dosage,
                       noteText: noteText, medName: medName,
-                      activityType: activityType, activityHasDuration: activityHasDuration)
+                      activityType: activityTypeIDs.first, activityHasDuration: activityHasDuration)
     }
 
     private var problem: ActivityProblem? { draft.problem }
@@ -832,8 +848,7 @@ struct EntityEditorView: View {
     /// alongside it. A warning, not a block: the cache can be stale, and the user may mean to fix
     /// the other entry afterwards.
     @ViewBuilder private var overlapWarning: some View {
-        if let other = overlappingRecord, let period = ActivityDraft.period(of: other) {
-            let name = (kind == .activity ? chosenActivityType?.name : nil) ?? kind.displayName
+        if let (other, name) = overlap, let period = ActivityDraft.period(of: other) {
             let message = "Overlaps the \(period.formatted(.interval.hour().minute())) \(name.lowercased()). Baby Buddy won\u{2019}t accept both."
             warningNotice(message, accessibilityLabel: "Warning. \(message)")
         }
@@ -841,8 +856,10 @@ struct EntityEditorView: View {
 
     /// Fetched rather than queried, so only records that could intersect are read: upstream caps a
     /// period at 24 hours, so anything starting earlier than that has already ended. Checked against
-    /// the child the entry will be saved under, which the Baby picker can change.
-    private var overlappingRecord: LocalEntity? {
+    /// the child the entry will be saved under, which the Baby picker can change. Comes with the
+    /// name to warn with: the kind's, or for an activity the type's, checked for each chosen type
+    /// that tracks duration.
+    private var overlap: (record: LocalEntity, name: String)? {
         guard ActivityDraft.overlapCheckedKinds.contains(kind), kind != .activity || activityHasDuration
         else { return nil }
         let kindRaw = kind.rawValue, child = Optional(selectedChildID)
@@ -850,9 +867,15 @@ struct EntityEditorView: View {
         let candidates = (try? context.fetch(FetchDescriptor<LocalEntity>(predicate: #Predicate {
             $0.kindRaw == kindRaw && $0.childID == child && $0.timestamp >= earliest && $0.timestamp < latest
         }))) ?? []
-        return ActivityDraft.overlapping(kind: kind, childID: selectedChildID, start: start, end: end,
-                                         excluding: entity?.localID, activityType: activityType,
-                                         in: candidates)
+        func overlapping(type: Int?) -> LocalEntity? {
+            ActivityDraft.overlapping(kind: kind, childID: selectedChildID, start: start, end: end,
+                                      excluding: entity?.localID, activityType: type, in: candidates)
+        }
+        guard kind == .activity else { return overlapping(type: nil).map { ($0, kind.displayName) } }
+        for type in chosenActivityTypes where type.hasDuration {
+            if let other = overlapping(type: type.id) { return (other, type.name) }
+        }
+        return nil
     }
 
     private func warningNotice(_ message: String, accessibilityLabel: String) -> some View {
@@ -932,7 +955,7 @@ struct EntityEditorView: View {
     // MARK: Load / save
 
     private func populate() {
-        if entity == nil, let activityTypePreset { activityType = activityTypePreset }
+        if entity == nil, let activityTypePreset { activityTypeIDs = [activityTypePreset] }
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
             if let s = timer.payloadObject["start"] as? String, let d = APIDate.parse(s) { start = d }
@@ -955,7 +978,7 @@ struct EntityEditorView: View {
         if let m = p["method"] as? String, let fm = FeedingMethod(rawValue: m) { feedingMethod = fm }
         if let a = p["amount"] as? Double { amount = trimmed(a) }
         if kind == .activity {
-            activityType = p["type"] as? Int
+            activityTypeIDs = (p["type"] as? Int).map { [$0] } ?? []
             // A type without duration shows its one moment, its start, as the time.
             time = parseDate("start") ?? time
         }
@@ -998,6 +1021,9 @@ struct EntityEditorView: View {
         } else if let entity {
             repo.update(entity, payload: payload)
             target = entity
+        } else if kind == .activity, activityTypeIDs.count > 1 {
+            logActivities(in: repo)
+            target = nil
         } else {
             target = repo.create(kind: kind, payload: payload, source: source)
         }
@@ -1008,6 +1034,22 @@ struct EntityEditorView: View {
         // Converting a source timer ends the Live Activity for that timer; a plain log is a no-op.
         Task { await liveActivity.reconcile() }
         dismiss()
+    }
+
+    /// A new activity of several types: one activity per type, and one toast that undoes them all.
+    private func logActivities(in repo: LocalRepository) {
+        let payloads = Self.activityPayloads(child: selectedChildID, types: chosenActivityTypes, start: start,
+                                             end: end, time: time, notes: notes, tags: tagNames)
+        let logged = payloads.compactMap { repo.create(kind: .activity, payload: $0, source: source)?.localID }
+        // Replaces each record's own toast, which would undo only the last.
+        if logged.count > 1, UndoToastCenter.isEnabled {
+            UndoToastCenter.shared.show("Logged \(logged.count) activities") { [context] in
+                let repo = LocalRepository(context: context)
+                for id in logged {
+                    if let entity = LocalStore.fetch(localID: id, in: context) { repo.delete(entity) }
+                }
+            }
+        }
     }
 
     /// Begin timing this activity instead of logging a finished record. Creates an open-ended
@@ -1094,7 +1136,7 @@ struct EntityEditorView: View {
             p["next_dose_interval"] = doseIntervalSeconds.map(APIDuration.string(from:)) ?? NSNull()
             p["notes"] = notes; p["tags"] = tagList
         case .activity:
-            guard let activityType else { break }
+            guard let activityType = activityTypeIDs.first else { break }
             p = Self.activityPayload(child: selectedChildID, type: activityType,
                                      hasDuration: activityHasDuration, start: start, end: end,
                                      time: time, notes: notes, tags: tagList)
@@ -1115,6 +1157,18 @@ struct EntityEditorView: View {
                 "start": iso.string(from: hasDuration ? start : time),
                 "end": iso.string(from: hasDuration ? end : time),
                 "notes": notes, "tags": tags]
+    }
+
+    /// A new activity's payloads, one per chosen type, with the same child, notes and tags. When any
+    /// type tracks duration the form has a start and an end: those types run from `start` to `end`,
+    /// and the others are the moment `start`. Otherwise every type is the moment `time`.
+    static func activityPayloads(child: Int, types: [ActivitiesCapability.TypeInfo], start: Date, end: Date,
+                                 time: Date, notes: String, tags: [String]) -> [[String: Any]] {
+        let moment = types.contains(where: \.hasDuration) ? start : time
+        return types.map {
+            activityPayload(child: child, type: $0.id, hasDuration: $0.hasDuration, start: start, end: end,
+                            time: moment, notes: notes, tags: tags)
+        }
     }
 
     /// The chosen next-dose interval in seconds; a blank or zero custom entry means none.

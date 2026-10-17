@@ -54,11 +54,13 @@ struct ActivityPickTile: View {
     /// Replace the kind's name and glyph, as an activity type's do.
     var title: String? = nil
     var icon: ActivityIcon? = nil
+    /// Replaces the kind's color, as an activity type's does.
+    var color: Color? = nil
     let isSelected: Bool
     var action: () -> Void
 
     var body: some View {
-        let color = BBColor.activity(kind)
+        let color = color ?? BBColor.activity(kind)
         Button(action: action) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top) {
@@ -175,7 +177,7 @@ struct EventRow: View {
     var body: some View {
         BBCard(cornerRadius: BBRadius.row, padding: 13) {
             HStack(spacing: 12) {
-                ActivityTile(kind: entity.kind, size: 40, glyph: 21, icon: entity.tileIcon)
+                ActivityTile(kind: entity.kind, size: 40, glyph: 21, color: entity.tileColor, icon: entity.tileIcon)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(EntityFormatting.title(entity)).font(.subheadline.weight(.semibold))
                     if let subtitle = EntityFormatting.subtitle(entity, unit: unit ?? .region), !subtitle.isEmpty {

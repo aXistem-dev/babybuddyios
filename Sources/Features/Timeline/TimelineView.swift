@@ -386,7 +386,7 @@ struct TimelineRailRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
-            RailNode(kind: entity.kind, icon: entity.tileIcon, connectsDown: connectsDown)
+            RailNode(kind: entity.kind, color: entity.tileColor, icon: entity.tileIcon, connectsDown: connectsDown)
             card.padding(.bottom, 9)
         }
         .padding(.horizontal, 16)
@@ -474,14 +474,15 @@ private struct RailNode: View {
     // clipping the glyph at large accessibility text sizes.
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
     let kind: EntityKind
-    /// An activity type's icon, drawn instead of the glyph.
+    /// An activity type's color and icon, drawn instead of the kind's.
+    var color: Color? = nil
     var icon: ActivityIcon? = nil
     let connectsDown: Bool
 
     private var columnWidth: CGFloat { 40 * min(typeScale, 1.6) }
 
     var body: some View {
-        ActivityTile(kind: kind, size: 38, glyph: 20, icon: icon)
+        ActivityTile(kind: kind, size: 38, glyph: 20, color: color, icon: icon)
             .padding(.top, 5)
             .frame(width: columnWidth, alignment: .top)
             .frame(maxHeight: .infinity, alignment: .top)

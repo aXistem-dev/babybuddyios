@@ -77,7 +77,7 @@ struct StopTimerSheet: View {
         BBCard {
             HStack(spacing: 14) {
                 ActivityTile(kind: pickedType != nil ? .activity : selected ?? .timer, size: 46, glyph: 24,
-                             icon: pickedType?.tileIcon)
+                             color: pickedType?.tileColor, icon: pickedType?.tileIcon)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(headline).font(.headline)
                     HStack(spacing: 6) {
