@@ -183,8 +183,14 @@ struct ActivityTypeFields: Equatable {
     var name = ""
     var emoji = ""
     var icon = "activities"
+    /// `#rrggbb`. A new type starts in the app's activity color; one the server sent without a
+    /// color keeps it blank until a color is picked.
+    var color = Self.defaultColor
     var hasDuration = false
     var active = true
+
+    /// The app's own activity color (light), which a type without a color is drawn in.
+    static let defaultColor = "#8455b8"
 
     init() {}
 
@@ -193,12 +199,27 @@ struct ActivityTypeFields: Equatable {
         name = p["name"] as? String ?? ""
         emoji = p["emoji"] as? String ?? ""
         icon = p["icon"] as? String ?? icon
+        color = p["color"] as? String ?? ""
         hasDuration = p["has_duration"] as? Bool ?? false
         active = p["active"] as? Bool ?? true
     }
 
+    /// A new type's fields, copied from a cached type's and named "<name> copy": the server refuses a
+    /// name that gives another type's slug.
+    init(duplicating p: [String: Any]) {
+        self.init(payload: p)
+        name = "\(Self.trimmed(name)) copy"
+    }
+
     static func trimmed(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The `#rrggbb` the server takes for color components; ones outside 0…1, as a wide-gamut color
+    /// picked on the phone can have, are clamped.
+    static func hex(red: Double, green: Double, blue: Double) -> String {
+        func byte(_ value: Double) -> Int { Int((min(max(value, 0), 1) * 255).rounded()) }
+        return String(format: "#%02x%02x%02x", byte(red), byte(green), byte(blue))
     }
 
     /// Why the name can't be saved, or nil.
@@ -215,10 +236,12 @@ struct ActivityTypeFields: Equatable {
 
     var isValid: Bool { nameProblem == nil && emojiIsValid }
 
-    /// A new type's POST body.
+    /// A new type's POST body. Without a color the server picks one.
     var body: [String: Any] {
-        ["name": Self.trimmed(name), "emoji": Self.trimmed(emoji), "icon": icon,
-         "has_duration": hasDuration, "active": active]
+        var body: [String: Any] = ["name": Self.trimmed(name), "emoji": Self.trimmed(emoji), "icon": icon,
+                                   "has_duration": hasDuration, "active": active]
+        if !color.isEmpty { body["color"] = color }
+        return body
     }
 
     /// The PATCH body for a type whose payload is `current`: only the fields that changed.
@@ -228,6 +251,7 @@ struct ActivityTypeFields: Equatable {
         if Self.trimmed(name) != before.name { body["name"] = Self.trimmed(name) }
         if Self.trimmed(emoji) != before.emoji { body["emoji"] = Self.trimmed(emoji) }
         if icon != before.icon { body["icon"] = icon }
+        if !color.isEmpty, color.lowercased() != before.color.lowercased() { body["color"] = color }
         if hasDuration != before.hasDuration { body["has_duration"] = hasDuration }
         if active != before.active { body["active"] = active }
         return body
