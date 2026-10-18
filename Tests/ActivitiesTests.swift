@@ -371,6 +371,7 @@ final class ActivitiesTests: XCTestCase {
         XCTAssertEqual(body["icon"] as? String, "activities")
         XCTAssertEqual(body["has_duration"] as? Bool, true)
         XCTAssertEqual(body["active"] as? Bool, true)
+        XCTAssertEqual(body["color"] as? String, "#8455b8", "A new type starts in the activity color")
 
         let current: [String: Any] = ["id": 4, "name": "Walk", "slug": "walk", "icon": "activities",
                                       "emoji": "🚶", "has_duration": true, "active": true, "order": 4]
@@ -383,6 +384,40 @@ final class ActivitiesTests: XCTestCase {
         XCTAssertEqual(Set(changes.keys), ["name", "active", "icon"])
         XCTAssertEqual(changes["name"] as? String, "Stroll")
         XCTAssertEqual(changes["active"] as? Bool, false)
+    }
+
+    /// A duplicate starts from the type's fields under a new name, since the server refuses a second
+    /// type with the same slug.
+    func testDuplicateTypeFields() {
+        let walk: [String: Any] = ["id": 4, "name": "Walk ", "slug": "walk", "icon": "sleep", "emoji": "🚶",
+                                   "has_duration": true, "active": false, "order": 4]
+        let copy = ActivityTypeFields(duplicating: walk)
+        XCTAssertEqual(copy.name, "Walk copy")
+        XCTAssertEqual(copy.emoji, "🚶")
+        XCTAssertEqual(copy.icon, "sleep")
+        XCTAssertTrue(copy.hasDuration)
+        XCTAssertFalse(copy.active)
+        XCTAssertEqual(copy.body["name"] as? String, "Walk copy")
+        XCTAssertNil(copy.body["slug"], "The server makes the slug")
+        XCTAssertNil(copy.body["color"], "Without a color the server picks one")
+        XCTAssertEqual(ActivityTypeFields(duplicating: ["name": "Bath", "color": "#00ff00"]).body["color"] as? String,
+                       "#00ff00")
+    }
+
+    /// A picked color is sent as the server's `#rrggbb`, and only when it changed; a wide-gamut pick
+    /// is clamped into range.
+    func testTypeColorField() {
+        XCTAssertEqual(ActivityTypeFields.hex(red: 1, green: 0.5, blue: 0), "#ff8000")
+        XCTAssertEqual(ActivityTypeFields.hex(red: 1.2, green: -0.1, blue: 0.2), "#ff0033")
+
+        let current: [String: Any] = ["id": 1, "name": "Bath", "icon": "activities", "emoji": "",
+                                      "color": "#00FF00", "has_duration": false, "active": true]
+        var edit = ActivityTypeFields(payload: current)
+        XCTAssertEqual(edit.color, "#00FF00")
+        edit.color = "#00ff00"
+        XCTAssertTrue(edit.changes(from: current).isEmpty, "The same color in other case")
+        edit.color = "#123456"
+        XCTAssertEqual(edit.changes(from: current) as? [String: String], ["color": "#123456"])
     }
 
     /// A refused delete offers deleting the activities too only when the server counted some and lets

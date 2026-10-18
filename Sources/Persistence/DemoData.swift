@@ -156,7 +156,7 @@ enum DemoData {
         var p = body
         p["id"] = id
         p["slug"] = slug.isEmpty ? "type-\(id)" : slug
-        p["color"] = "#8455b8"
+        if p["color"] == nil { p["color"] = "#8455b8" }
         p["order"] = id
         insert(.activityType, id: id, p, context)
     }

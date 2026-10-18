@@ -221,6 +221,47 @@ final class ActivityTests: UITestCase {
         expect(app.staticTexts["End"])
     }
 
+    /// A type that tracks duration shows a stopwatch instead of a label. Swiping left offers Edit and
+    /// Delete; deleting asks first.
+    func testSwipeToEditOrDeleteType() {
+        launch(["BB_START_TAB": "settings"])
+        tap(app.buttons.labeled("Activity types"))
+        expect(app.buttons["Walk, Tracks duration"])
+        XCTAssertFalse(app.staticTexts["Start and end"].exists)
+
+        app.buttons.labeled("Walk").swipeLeft()
+        tap(app.buttons["Edit"])
+        let edit = expect(app.navigationBars["Edit activity type"])
+        XCTAssertEqual(app.textFields["Name"].value as? String, "Walk")
+        tap(edit.buttons["Cancel"])
+        expectGone(edit)
+
+        app.buttons.labeled("Haircut").swipeLeft()
+        tap(app.buttons["Delete"])
+        tap(app.alerts["Delete this activity type?"].buttons["Cancel"])
+        expect(app.buttons.labeled("Haircut"))
+        app.buttons.labeled("Haircut").swipeLeft()
+        tap(app.buttons["Delete"])
+        tap(app.alerts["Delete this activity type?"].buttons["Delete"])
+        expectGone(app.buttons.labeled("Haircut"))
+    }
+
+    /// Swiping right duplicates a type: a new type with its fields, under a new name.
+    func testSwipeToDuplicateType() {
+        launch(["BB_START_TAB": "settings"])
+        tap(app.buttons.labeled("Activity types"))
+        app.buttons.labeled("Walk").swipeRight()
+        tap(app.buttons["Duplicate"])
+        let new = expect(app.navigationBars["New activity type"])
+        expect(app.buttons["Color"])
+        XCTAssertEqual(app.textFields["Name"].value as? String, "Walk copy")
+        XCTAssertEqual(app.switches["Track duration"].value as? String, "1")
+        tap(new.buttons["Save"])
+        expectGone(new)
+        expect(app.buttons["Walk copy, Tracks duration"])
+        expect(app.buttons["Walk, Tracks duration"])
+    }
+
     /// Deactivating a type takes it out of the editor; its activities stay on the timeline.
     func testDeactivateType() {
         launch(["BB_START_TAB": "settings"])

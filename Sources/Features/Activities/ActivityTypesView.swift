@@ -2,8 +2,8 @@ import SwiftUI
 import SwiftData
 
 /// Settings ▸ Activity types: the server's activity types in its order, with their icons, and adding,
-/// editing and deleting them as far as the server's `permissions` allow. Online only (see
-/// ``ActivityTypesModel``).
+/// editing, duplicating and deleting them as far as the server's `permissions` allow. A row swipes
+/// left to edit or delete, and right to duplicate. Online only (see ``ActivityTypesModel``).
 struct ActivityTypesView: View {
     @Environment(AppSession.self) private var session
     @Environment(SyncEngine.self) private var sync
@@ -11,6 +11,8 @@ struct ActivityTypesView: View {
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "activityType" }) private var records: [LocalEntity]
     @State private var model = ActivityTypesModel()
     @State private var editing: ActivityTypeForm.Target?
+    /// The type a swipe asked to delete, waiting for the confirmation.
+    @State private var deleting: LocalEntity?
     @AppStorage(ActivitiesCapability.permissionsKey, store: SharedDefaults.suite) private var permissionsData: Data?
 
     private var permissions: ActivitiesCapability.Permissions { ActivitiesCapability.permissions }
@@ -25,34 +27,35 @@ struct ActivityTypesView: View {
 
     var body: some View {
         let _ = permissionsData // redraw when a sync changes the permissions
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                BBCard(cornerRadius: BBRadius.tile, padding: 0) {
-                    VStack(spacing: 0) {
-                        if types.isEmpty {
-                            Text("No activity types yet.")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 15).padding(.vertical, 13)
-                        }
-                        ForEach(Array(types.enumerated()), id: \.element.record.localID) { index, type in
-                            if index > 0 {
-                                Rectangle().fill(BBColor.divider).frame(height: 0.5).padding(.leading, 15)
-                            }
-                            row(type.record, type.info)
-                        }
-                    }
+        // A list, for the swipe actions, drawn as the one card the other screens use.
+        List {
+            Section {
+                if types.isEmpty {
+                    Text("No activity types yet.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                        .listRowBackground(BBColor.card)
                 }
+                ForEach(types, id: \.record.localID) { type in
+                    row(type.record, type.info)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(BBColor.card)
+                        .listRowSeparatorTint(BBColor.divider)
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) { duplicateAction(type.record) }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) { editActions(type.record) }
+                }
+            } footer: {
                 if let footer {
                     Text(footer.text)
                         .font(.caption)
                         .foregroundStyle(footer.isProblem ? BBColor.danger : Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 4).padding(.top, 2)
                 }
             }
-            .padding(.horizontal).padding(.top, 8)
         }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(.compact)
+        .contentMargins(.top, 8, for: .scrollContent)
+        .scrollContentBackground(.hidden)
         .background(BBColor.surface)
         .navigationTitle("Activity types")
         .navigationBarTitleDisplayMode(.inline)
@@ -70,21 +73,73 @@ struct ActivityTypesView: View {
         .sheet(item: $editing) { target in
             ActivityTypeForm(target: target, model: model, permissions: permissions)
         }
+        .alert("Delete this activity type?",
+               isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+               presenting: deleting) { record in
+            Button("Delete", role: .destructive) {
+                Task { _ = await model.delete(record, session: session, context: context, sync: sync) }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        // A swiped delete that activities use, as the form asks it. The form asks for its own.
+        .alert(model.pendingCascade.map {
+                   ActivityTypeFields.cascadeTitle(name: $0.name, activityCount: $0.activityCount)
+               } ?? "",
+               isPresented: Binding(get: { editing == nil && model.pendingCascade != nil },
+                                    set: { if !$0 { model.pendingCascade = nil } })) {
+            Button("Delete", role: .destructive) { Task { await deleteWithActivities() } }
+            Button("Cancel", role: .cancel) { model.pendingCascade = nil }
+        } message: {
+            Text(ActivityTypeFields.cascadeMessage)
+        }
+    }
+
+    /// Swiping right: a new type with this one's fields.
+    @ViewBuilder private func duplicateAction(_ record: LocalEntity) -> some View {
+        if permissions.add, model.isOnline {
+            Button { editing = .duplicate(record) } label: {
+                Label("Duplicate", systemImage: "plus.square.on.square")
+            }
+            .tint(BBColor.repeatAction)
+        }
+    }
+
+    /// Swiping left: delete, after a confirmation, and edit. No role on Delete: a destructive one
+    /// would take the row away before the confirmation.
+    @ViewBuilder private func editActions(_ record: LocalEntity) -> some View {
+        if model.isOnline {
+            if permissions.delete {
+                Button { deleting = record } label: { Label("Delete", systemImage: "trash") }
+                    .tint(BBColor.danger)
+            }
+            if permissions.change {
+                Button { editing = .existing(record) } label: { Label("Edit", systemImage: "pencil") }
+                    .tint(BBColor.primary)
+            }
+        }
+    }
+
+    private func deleteWithActivities() async {
+        guard let type = model.pendingCascade?.type else { return }
+        _ = await model.deleteWithActivities(type, session: session, context: context, sync: sync)
     }
 
     private func row(_ record: LocalEntity, _ type: ActivitiesCapability.TypeInfo) -> some View {
         let canOpen = (permissions.change || permissions.delete) && model.isOnline
-        let details = [type.hasDuration ? "Start and end" : nil, type.active ? nil : "Inactive"].compactMap { $0 }
         return Button { editing = .existing(record) } label: {
             HStack(spacing: 12) {
                 ActivityTile(kind: .activity, size: 30, glyph: 17, color: type.tileColor, icon: type.tileIcon)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(type.name).font(.body).foregroundStyle(.primary)
-                    if !details.isEmpty {
-                        Text(details.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                    if !type.active {
+                        Text("Inactive").font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Spacer(minLength: 8)
+                if type.hasDuration {
+                    Image(systemName: "stopwatch").font(.subheadline).foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
                 if canOpen {
                     Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
                 }
@@ -94,7 +149,8 @@ struct ActivityTypesView: View {
         }
         .buttonStyle(.plain)
         .disabled(!canOpen)
-        .accessibilityLabel(([type.name] + details).joined(separator: ", ")) // a Button is one element already
+        .accessibilityLabel([type.name, type.hasDuration ? "Tracks duration" : nil, type.active ? nil : "Inactive"]
+            .compactMap { $0 }.joined(separator: ", ")) // a Button is one element already
     }
 
     private var footer: (text: String, isProblem: Bool)? {
@@ -106,15 +162,18 @@ struct ActivityTypesView: View {
     }
 }
 
-/// Adding or editing one activity type: its name, an optional emoji, its icon, whether it tracks
-/// duration, and whether it's offered. Editing can also delete it.
+/// Adding or editing one activity type: its name, an optional emoji, its icon and color, whether it
+/// tracks duration, and whether it's offered. Editing can also delete it.
 struct ActivityTypeForm: View {
     enum Target: Identifiable {
         case new
+        /// A new type, starting from this one's fields.
+        case duplicate(LocalEntity)
         case existing(LocalEntity)
         var id: String {
             switch self {
             case .new: return "new"
+            case .duplicate(let type): return "duplicate-" + type.localID.uuidString
             case .existing(let type): return type.localID.uuidString
             }
         }
@@ -152,6 +211,7 @@ struct ActivityTypeForm: View {
                                     .font(.caption).foregroundStyle(BBColor.danger)
                             }
                             iconRow
+                            colorRow
                             if let slug = existing?.payloadObject["slug"] as? String {
                                 Text("The type\u{2019}s key (\(slug)) stays the same when you rename it.")
                                     .font(.footnote).foregroundStyle(.secondary)
@@ -212,7 +272,11 @@ struct ActivityTypeForm: View {
                 Text(ActivityTypeFields.cascadeMessage)
             }
             .onAppear {
-                if let existing { fields = ActivityTypeFields(payload: existing.payloadObject) }
+                switch target {
+                case .new: break
+                case .duplicate(let type): fields = ActivityTypeFields(duplicating: type.payloadObject)
+                case .existing(let type): fields = ActivityTypeFields(payload: type.payloadObject)
+                }
             }
         }
     }
@@ -234,6 +298,20 @@ struct ActivityTypeForm: View {
             }
             .pickerStyle(.menu)
             .tint(BBColor.brandAccent)
+        }
+    }
+
+    /// The type's color, picked with the system's color picker. The tiles draw it at 75% opacity.
+    private var colorRow: some View {
+        ColorPicker(selection: Binding(
+            get: { Color(hex: fields.color) ?? BBColor.customActivity },
+            set: { color in
+                let c = UIColor(color).resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+                var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+                c.getRed(&r, green: &g, blue: &b, alpha: &a)
+                fields.color = ActivityTypeFields.hex(red: r, green: g, blue: b)
+            }), supportsOpacity: false) {
+            Text("Color").font(.subheadline).foregroundStyle(.secondary)
         }
     }
 
