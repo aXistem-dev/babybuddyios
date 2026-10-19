@@ -38,7 +38,10 @@ enum DemoData {
     static func seedIfNeeded(into context: ModelContext) {
         refreshDemoStash()
         let existing = (try? context.fetch(FetchDescriptor<LocalEntity>()))?.isEmpty ?? true
-        guard existing else { return }
+        guard existing else {
+            refreshDemoActivities(in: context)
+            return
+        }
 
         insert(.child, id: 1, [
             "id": 1, "first_name": "Maya", "last_name": "Guy",
@@ -100,6 +103,9 @@ enum DemoData {
         if ProcessInfo.processInfo.environment["BB_NO_STASH"] != "1" {
             seedStashSources(into: context)
         }
+        if ProcessInfo.processInfo.environment["BB_NO_ACTIVITIES"] != "1" {
+            seedActivities(into: context)
+        }
 
         if ProcessInfo.processInfo.environment["BB_SEED_CONFLICT"] == "1" {
             seedConflict(into: context)
@@ -114,6 +120,96 @@ enum DemoData {
             seedSecondChild(into: context)
         }
         try? context.save()
+        refreshDemoActivities(in: context)
+    }
+
+    // MARK: Activities
+
+    /// Activities, as a server with them would hold them: three activity types without duration, one
+    /// with, and an inactive one, and activities of the first four for the demo child, among them a
+    /// bath and a pajama change at the same time. Types 1–5, activities 5000+.
+    @MainActor
+    private static func seedActivities(into context: ModelContext) {
+        let now = Date()
+        func iso(_ minutesAgo: Double) -> String {
+            APIDate.isoDateTime.string(from: now.addingTimeInterval(-minutesAgo * 60))
+        }
+        for (id, name, slug, emoji, hasDuration, active) in [
+            (1, "Bath", "bath", "🛁", false, true), (2, "Pajama change", "pajama-change", "👕", false, true),
+            (3, "Bodysuit change", "bodysuit-change", "🩲", false, true), (4, "Walk", "walk", "🚶", true, true),
+            (5, "Haircut", "haircut", "", false, false),
+        ] {
+            insert(.activityType, id: id, [
+                "id": id, "name": name, "slug": slug, "icon": "activities", "emoji": emoji,
+                "color": "#8455b8", "has_duration": hasDuration, "active": active, "order": id,
+            ], context)
+        }
+        let together = iso(26 * 60)
+        for (id, type, start, end) in [
+            (5000, 1, iso(50 * 60), iso(50 * 60)), (5001, 1, together, together),
+            (5002, 2, together, together), (5003, 3, iso(180), iso(180)), (5004, 4, iso(300), iso(260)),
+        ] {
+            insert(.activity, id: id, [
+                "id": id, "child": 1, "type": type, "start": start, "end": end, "notes": "", "tags": [],
+            ], context)
+        }
+    }
+
+    /// Demo mode's `POST /api/activity-types/`: a new type with the next id, the last order and a slug
+    /// made from its name, as the server makes them.
+    @MainActor
+    static func createDemoActivityType(_ body: [String: Any], in context: ModelContext) {
+        let types = LocalStore.fetch(kind: .activityType, in: context)
+        let id = (types.compactMap(\.serverID).max() ?? 0) + 1
+        let name = body["name"] as? String ?? ""
+        let slug = name.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }.joined(separator: "-")
+        var p = body
+        p["id"] = id
+        p["slug"] = slug.isEmpty ? "type-\(id)" : slug
+        if p["color"] == nil { p["color"] = "#8455b8" }
+        p["order"] = id
+        insert(.activityType, id: id, p, context)
+    }
+
+    /// Demo mode's `PATCH /api/activity-types/<id>/`: the changed fields; the slug stays.
+    @MainActor
+    static func updateDemoActivityType(_ type: LocalEntity, with changes: [String: Any], in context: ModelContext) {
+        var p = type.payloadObject
+        for (key, value) in changes { p[key] = value }
+        if let id = type.serverID { insert(.activityType, id: id, p, context) }
+    }
+
+    /// Demo mode's `DELETE /api/activity-types/<id>/`. Like the server, it refuses a type activities
+    /// use, saying how many.
+    @MainActor
+    static func deleteDemoActivityType(_ type: LocalEntity, in context: ModelContext) throws {
+        let id = type.serverID
+        let activities = LocalStore.fetch(kind: .activity, in: context)
+        let count = activities.filter { $0.payloadObject["type"] as? Int == id }.count
+        if count > 0 {
+            throw DeleteConflict(message: "This activity type is used by activities and can not be deleted.",
+                                 activityCount: count)
+        }
+        context.delete(type)
+    }
+
+    /// Demo mode's stand-in for what a sync learns about activities from `GET /api/`, the cached
+    /// activity types, and what the user may do with them: everything, or nothing with
+    /// `BB_ACTIVITY_TYPES_READONLY=1`. `BB_NO_ACTIVITIES=1` runs the demo as a server without
+    /// activities.
+    @MainActor
+    private static func refreshDemoActivities(in context: ModelContext) {
+        guard ProcessInfo.processInfo.environment["BB_NO_ACTIVITIES"] != "1" else {
+            ActivitiesCapability.update(rootJSON: Data(#"{"children":"x","notes":"x"}"#.utf8))
+            return
+        }
+        ActivitiesCapability.update(rootJSON: Data(#"{"activity-types":"x","activities":"x"}"#.utf8))
+        let types = LocalStore.fetch(kind: .activityType, in: context)
+        ActivitiesCapability.store(typesIn: types)
+        let manages = ProcessInfo.processInfo.environment["BB_ACTIVITY_TYPES_READONLY"] != "1"
+        ActivitiesCapability.store(permissions: .init(add: manages, change: manages, delete: manages,
+                                                      deleteWithActivities: manages))
     }
 
     /// `BB_SEED_SECOND_CHILD=1`: a second child with no records of her own, so the Editor's Baby

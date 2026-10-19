@@ -138,8 +138,8 @@ extension Analytics {
     /// Where a timer action originated.
     enum TimerSource: String { case app, widget }
 
-    /// A timer was started. `activity` is feeding/sleep/tummyTime/pumping, or "other" for an
-    /// uncategorized custom timer.
+    /// A timer was started. `activity` is feeding/sleep/tummyTime/pumping, "activity" for a
+    /// user-defined activity type, or "other" for an uncategorized custom timer.
     static func timerStarted(activity: String, source: TimerSource) {
         signal("Timer.started", parameters: ["activity": activity, "source": source.rawValue])
     }
@@ -162,6 +162,8 @@ extension Analytics {
         /// The editor opened from sick mode: the sick card's "Log temperature", or a medicine
         /// card's button for the next dose.
         case sickMode
+        /// One tap on an activity type in the Add Activity sheet, logged now without the editor.
+        case quickAdd
     }
 
     /// A completed activity record was logged (created), of any kind — e.g. a diaper change,

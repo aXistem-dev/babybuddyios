@@ -14,22 +14,31 @@ struct StopTimerSheet: View {
 
     let timer: LocalEntity
     let onLog: (EntityKind) -> Void
+    /// Log it as an activity of this type, from its start to its stop.
+    let onLogActivity: (ActivitiesCapability.TypeInfo) -> Void
     let onResume: () -> Void
     let onDiscard: () -> Void
 
     @State private var selected: EntityKind?
+    /// An activity type picked instead of a kind, by id.
+    @State private var selectedType: Int?
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "activityType" }) private var activityTypeRecords: [LocalEntity]
 
     /// The convertible activities — same set as the Start Timer grid.
     private let activities: [EntityKind] = [.feeding, .sleep, .tummyTime, .pumping]
     private let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
-    init(timer: LocalEntity, onLog: @escaping (EntityKind) -> Void, onResume: @escaping () -> Void,
+    init(timer: LocalEntity, onLog: @escaping (EntityKind) -> Void,
+         onLogActivity: @escaping (ActivitiesCapability.TypeInfo) -> Void, onResume: @escaping () -> Void,
          onDiscard: @escaping () -> Void) {
         self.timer = timer
         self.onLog = onLog
+        self.onLogActivity = onLogActivity
         self.onResume = onResume
         self.onDiscard = onDiscard
-        _selected = State(initialValue: TimerActivity(timer: timer)?.convertKind)
+        let type = ActivitiesCapability.timerType(of: timer)
+        _selected = State(initialValue: type == nil ? TimerActivity(timer: timer)?.convertKind : nil)
+        _selectedType = State(initialValue: type?.id)
     }
 
     var body: some View {
@@ -42,9 +51,11 @@ struct StopTimerSheet: View {
                         ForEach(activities) { kind in
                             ActivityPickTile(kind: kind, isSelected: selected == kind) {
                                 selected = (selected == kind) ? nil : kind
+                                selectedType = nil
                             }
                         }
                     }
+                    ActivityTypePickGrid(types: timedTypes, selection: $selectedType) { selected = nil }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -65,7 +76,8 @@ struct StopTimerSheet: View {
     private var summaryCard: some View {
         BBCard {
             HStack(spacing: 14) {
-                ActivityTile(kind: selected ?? .timer, size: 46, glyph: 24)
+                ActivityTile(kind: pickedType != nil ? .activity : selected ?? .timer, size: 46, glyph: 24,
+                             color: pickedType?.tileColor, icon: pickedType?.tileIcon)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(headline).font(.headline)
                     HStack(spacing: 6) {
@@ -83,6 +95,19 @@ struct StopTimerSheet: View {
                     .accessibilityLabel("Stopped after \(EntityFormatting.spokenDuration(elapsed))")
             }
         }
+    }
+
+    /// The activity types with duration a timer can be logged as: the active ones, and the type this
+    /// timer was started for even if it's inactive now.
+    private var timedTypes: [ActivitiesCapability.TypeInfo] {
+        guard ActivitiesCapability.isSupported else { return [] }
+        let started = ActivitiesCapability.timerType(of: timer)?.id
+        return ActivitiesCapability.types(in: activityTypeRecords)
+            .filter { $0.hasDuration && ($0.active || $0.id == started) }
+    }
+
+    private var pickedType: ActivitiesCapability.TypeInfo? {
+        selectedType.flatMap { id in timedTypes.first { $0.id == id } }
     }
 
     /// Frozen at Stop, so a parent who walks away mid-sheet comes back to the same number.
@@ -106,6 +131,7 @@ struct StopTimerSheet: View {
     /// Reflects what's being logged: the chosen type (so it stays in step with the tile and the
     /// picker), falling back to the timer's name when no type is selected.
     private var headline: String {
+        if let pickedType { return pickedType.name }
         if let selected { return selected.displayName }
         if let name = timer.payloadObject["name"] as? String, !name.isEmpty { return name }
         return "Timer"
@@ -115,10 +141,12 @@ struct StopTimerSheet: View {
 
     private var actions: some View {
         VStack(spacing: 8) {
-            Button { if let selected { onLog(selected) } } label: { Text(logTitle) }
+            Button {
+                if let pickedType { onLogActivity(pickedType) } else if let selected { onLog(selected) }
+            } label: { Text(logTitle) }
                 .buttonStyle(logStyle)
-                .disabled(selected == nil)
-                .opacity(selected == nil ? 0.5 : 1)
+                .disabled(selected == nil && pickedType == nil)
+                .opacity(selected == nil && pickedType == nil ? 0.5 : 1)
 
             HStack {
                 Button("Resume timer") { onResume() }
@@ -142,6 +170,7 @@ struct StopTimerSheet: View {
     }
 
     private var logTitle: String {
+        if let pickedType { return "Log \(pickedType.name.lowercased())" }
         guard let selected else { return "Choose a type to log" }
         // Feeding/pumping need type/method/amount, so logging them continues to a detail form.
         let needsDetails = TimerActivity(convertKind: selected)?.isInstantLoggable == false
@@ -151,8 +180,8 @@ struct StopTimerSheet: View {
     /// The log button adopts the chosen activity's color (dark-on-tint label for both modes);
     /// brand-blue while nothing is chosen.
     private var logStyle: BBFilledButton {
-        guard let selected else { return .bbPrimary }
-        return BBFilledButton(background: BBColor.activity(selected),
+        guard let kind = pickedType != nil ? EntityKind.activity : selected else { return .bbPrimary }
+        return BBFilledButton(background: BBColor.activity(kind),
                               foreground: Color.adaptive(light: "FFFFFF", dark: "0C0E12"))
     }
 }
