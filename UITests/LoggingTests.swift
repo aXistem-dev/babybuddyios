@@ -216,6 +216,23 @@ final class LoggingTests: UITestCase {
         expectGone(bar)
     }
 
+    /// Nothing later than now, as the server has it: a change timed five minutes ahead is refused, not
+    /// queued to be refused by the server.
+    func testTimeMinutesAheadIsRefused() throws {
+        try XCTSkipUnless(Calendar.current.isDateInToday(Date().addingTimeInterval(8 * 60)),
+                          "Five minutes ahead could land on tomorrow")
+        launch()
+        openEditor("Diaper")
+        let bar = expect(app.navigationBars["New Diaper Change"])
+        // Taken once the editor is open, and with room for a wheel that stops a minute short.
+        let ahead = Date().addingTimeInterval(5 * 60)
+        setStartTime(ahead) // the change's Time is its first picker
+
+        expect(element(labeled: "Can\u{2019}t save yet. That time is in the future"))
+        XCTAssertFalse(bar.buttons["Save"].isEnabled)
+        XCTAssertFalse(app.buttons["Save Diaper Change"].isEnabled)
+    }
+
     /// Baby Buddy refuses a feeding that overlaps another, so the editor names the cached one it
     /// would overlap. Only a warning: Save stays enabled. The seeded feeding ran 90 to 70 minutes
     /// before launch; a new one started 80 minutes ago and ending now overlaps it.

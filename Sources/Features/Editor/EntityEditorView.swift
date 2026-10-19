@@ -90,6 +90,9 @@ struct EntityEditorView: View {
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" }) private var medications: [LocalEntity]
 
     @State private var confirmingDelete = false
+    /// Bumped when Save finds a time that has turned out to be in the future, so the form redraws
+    /// with the notice saying why.
+    @State private var refusedSaves = 0
     /// The queued write for this record that the server refused, if any. Drives the sync banner.
     @State private var blockedMutation: PendingMutation?
     @State private var showingPending = false
@@ -695,7 +698,10 @@ struct EntityEditorView: View {
                       noteText: noteText, medName: medName)
     }
 
-    private var problem: ActivityProblem? { draft.problem }
+    private var problem: ActivityProblem? {
+        _ = refusedSaves
+        return draft.problem
+    }
     private var isValid: Bool { problem == nil }
 
     /// Why Save is disabled, inline above the Save button. Amber rather than red: nothing has gone
@@ -867,6 +873,13 @@ struct EntityEditorView: View {
     }
 
     private func save() {
+        // "Now" is when Save is tapped, not when the form last drew.
+        var atSave = draft
+        atSave.now = .now
+        guard atSave.problem == nil else {
+            refusedSaves += 1
+            return
+        }
         let payload = buildPayload()
         let repo = LocalRepository(context: context)
         let target: LocalEntity?
