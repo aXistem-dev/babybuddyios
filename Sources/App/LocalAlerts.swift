@@ -191,11 +191,49 @@ enum TemperatureCheckPolicy {
     }
 }
 
+/// The milk stash's "expiring soon" and "expired" alerts, at the times the server gives the milk in
+/// it. Ids are per time (`stash-warn-<epoch>`), so milk stored at the same moment gets one alert, and
+/// the text names no amount, which milk used oldest first would leave stale. Milk past its time when
+/// first seen gets no alert: the stash screen shows it.
+enum StashAgePolicy {
+    static let enabledKey = "stashAgeAlertsEnabled"
+
+    /// On unless switched off. UI tests (`BB_UITEST=1`, DEBUG) start with it off: the demo stash
+    /// always holds old milk, so on it would ask for permission over every other test.
+    static var defaultOn: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["BB_UITEST"] == "1" { return false }
+        #endif
+        return true
+    }
+
+    static var isEnabled: Bool { SharedDefaults.suite.object(forKey: enabledKey) as? Bool ?? defaultOn }
+
+    /// The alerts the stash's milk wants, each opening the stash screen. A lot keeps wanting its
+    /// alerts while it lasts, past or not, so a delivered one stays in Notification Center until the
+    /// milk is used or thrown away.
+    static func requests(from summary: StashSummaryDTO?) -> [ForgottenTimerPolicy.Request] {
+        var seen = Set<String>()
+        return (summary?.lots ?? []).flatMap { lot in
+            [ForgottenTimerPolicy.Request(
+                id: "stash-warn-\(Int(lot.warn_at.timeIntervalSince1970))", fireDate: lot.warn_at,
+                title: "Milk expiring soon", body: "Some stored milk expires soon. Use it first.",
+                url: "babybuddy://stash"),
+             ForgottenTimerPolicy.Request(
+                id: "stash-expire-\(Int(lot.expires_at.timeIntervalSince1970))", fireDate: lot.expires_at,
+                title: "Milk has expired", body: "Some stored milk has expired. Throw it away.",
+                url: "babybuddy://stash")]
+        }
+        .filter { seen.insert($0.id).inserted }
+    }
+}
+
 /// Keeps the app's local notifications in step with the shared store: forgotten-timer alerts,
-/// medication next-dose reminders and sick mode's temperature checks. Mirrors
-/// ``LiveActivityManager``: one idempotent ``reconcile()`` that ``LiveActivityManager/reconcile()``
-/// calls, so every timer start/stop/discard, editor save/delete and app foreground already covers
-/// it; ``SyncEngine`` adds a pull that brought changes (a dose logged on the web).
+/// medication next-dose reminders, sick mode's temperature checks and the milk stash's expiry
+/// alerts. Mirrors ``LiveActivityManager``: one idempotent ``reconcile()`` that
+/// ``LiveActivityManager/reconcile()`` calls, so every timer start/stop/discard, editor save/delete
+/// and app foreground already covers it; ``SyncEngine`` adds a pull that brought changes (a dose
+/// logged on the web).
 @MainActor
 final class LocalAlerts {
     static let shared = LocalAlerts()
@@ -205,10 +243,13 @@ final class LocalAlerts {
         let timersOn = ForgottenTimerPolicy.isEnabled, dosesOn = MedicationReminderPolicy.isEnabled
         let checksOn = SickMode.checkHours > 0 && !SickModeStore.shared.active.isEmpty
         let wanted = timersOn || dosesOn || checksOn ? wantedRequests() : (timers: [], doses: [], checks: [])
+        // Off, signed out or on a server without the stash, nothing is wanted, so the plan below
+        // removes any stash alert still pending.
+        let stash = StashAgePolicy.isEnabled ? StashAgePolicy.requests(from: StashCapability.summary) : []
         // The setting can arrive on before permission was ever asked (a restored App Group
         // default); ask now rather than schedule alerts that can never show. Temperature checks are
         // on by default, so they ask the first time one is due: sick mode on, with a fever.
-        if timersOn || dosesOn || !wanted.checks.isEmpty,
+        if timersOn || dosesOn || !wanted.checks.isEmpty || stash.contains(where: { $0.fireDate > .now }),
            await center.notificationSettings().authorizationStatus == .notDetermined {
             _ = await requestAuthorization()
         }
@@ -220,11 +261,12 @@ final class LocalAlerts {
             })
         let delivered = Set(await center.deliveredNotifications().map(\.request.identifier))
 
-        // A dose reminder or temperature check that is already overdue when first seen (an old
-        // dose, or the app opened long after) says nothing useful, so only timers fire late.
+        // A dose reminder, temperature check or milk alert that is already overdue when first seen
+        // (an old dose, or the app opened long after) says nothing useful, so only timers fire late.
         for (prefix, requests, firesOverdue) in [("timer-", timersOn ? wanted.timers : [], true),
                                                  ("medication-", dosesOn ? wanted.doses : [], false),
-                                                 ("temperature-", wanted.checks, false)] {
+                                                 ("temperature-", wanted.checks, false),
+                                                 ("stash-", stash, false)] {
             let plan = ForgottenTimerPolicy.plan(wanted: requests, pending: pending, delivered: delivered,
                                                  prefix: prefix, firesOverdue: firesOverdue)
             center.removePendingNotificationRequests(withIdentifiers: plan.remove)

@@ -51,6 +51,19 @@ final class SignOutWipeTests: XCTestCase {
         XCTAssertNil(SharedDefaults.selectedChildID)
     }
 
+    /// Whether the server had the milk stash, and its summary, belong to the server being left: the
+    /// next one starts from "not supported" until its own API root says otherwise.
+    func testSignOutResetsStashCapability() {
+        StashCapability.store(summary: StashSummaryDTO(balance: 50, status: .ok, warn_age_hours: 48,
+                                                       max_age_hours: 72, expired_amount: 0, lots: []))
+        XCTAssertTrue(StashCapability.isSupported)
+
+        AppSession(context: context).signOut()
+
+        XCTAssertFalse(StashCapability.isSupported)
+        XCTAssertNil(StashCapability.summary)
+    }
+
     /// The same server typed with a trailing slash or different casing must *not* count as a
     /// move — that would wipe unsynced work on an ordinary re-login.
     func testServerKeyIgnoresTrailingSlashAndCase() throws {

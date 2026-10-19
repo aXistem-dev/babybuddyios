@@ -22,8 +22,9 @@ struct DashboardView: View {
     /// events, every child record (for the header/switcher), and every timer (deep links can
     /// target a timer belonging to any child). Rebuilt on child switch via `init`.
     @Query private var allEntities: [LocalEntity]
-    /// Navigation path for the day-timeline pushes (in-app "Today" tiles + the status widget).
-    @State private var navPath: [EntityKind] = []
+    /// Navigation path for the day-timeline pushes (in-app "Today" tiles + the status widget) and
+    /// the milk stash screen.
+    @State private var navPath: [DashboardRoute] = []
     @State private var addKind: EntityKind?
     @State private var editing: LocalEntity?
     /// A dose whose reminder was tapped: the editor opens a new dose pre-filled from it.
@@ -36,6 +37,11 @@ struct DashboardView: View {
     /// A kind chosen from the "More" sheet, opened in the editor once that sheet has dismissed
     /// (so the editor doesn't try to present while another sheet is still on screen).
     @State private var pendingAddKind: EntityKind?
+    /// The milk stash screen chosen from the "More" sheet, pushed once that sheet has dismissed.
+    @State private var pendingStash = false
+    /// Whether the server has the milk stash, and its summary, for the stash card.
+    @AppStorage(StashCapability.supportedKey, store: SharedDefaults.suite) private var stashSupported = false
+    @AppStorage(StashCapability.summaryKey, store: SharedDefaults.suite) private var stashData: Data?
     @State private var stoppingTimer: LocalEntity?
     @State private var convertRequest: ConvertRequest?
     /// A convert deferred until the Stop sheet finishes dismissing, so the detail editor doesn't
@@ -152,6 +158,10 @@ struct DashboardView: View {
                         }
 
                         todaySection
+                        if let stash = StashCapability.summary(from: stashData), stashSupported,
+                           !stash.lots.isEmpty || stash.balance != 0 {
+                            stashCard(stash)
+                        }
                         if !latestEvents.isEmpty { latestSection }
                     }
                 }
@@ -162,8 +172,11 @@ struct DashboardView: View {
             }
             .background(BBColor.surface)
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: EntityKind.self) { kind in
-                DayTimelineView(kind: kind, childID: selectedChildID)
+            .navigationDestination(for: DashboardRoute.self) { route in
+                switch route {
+                case .day(let kind): DayTimelineView(kind: kind, childID: selectedChildID)
+                case .stash: StashView(childID: selectedChildID)
+                }
             }
             .overlay(alignment: .bottom) {
                 UndoToastView().padding(.bottom, 84) // clear of the floating add button
@@ -183,10 +196,13 @@ struct DashboardView: View {
             .sheet(isPresented: $showAllActivities, onDismiss: {
                 // Open the editor only after the "More" sheet is fully gone.
                 if let pendingAddKind { addKind = pendingAddKind; self.pendingAddKind = nil }
+                if pendingStash { navPath.append(.stash); pendingStash = false }
             }) {
                 AllActivitiesSheet(
                     showsSickMode: sickModeStart == nil,
+                    showsStash: stashSupported,
                     onPick: { kind in pendingAddKind = kind; showAllActivities = false },
+                    onOpenStash: { pendingStash = true; showAllActivities = false },
                     onStartSickMode: {
                         sickMode.turnOn(selectedChildID, at: .now, source: .addSheet)
                         showAllActivities = false
@@ -232,6 +248,7 @@ struct DashboardView: View {
             .onChange(of: router.convertTarget) { _, target in openConvert(target) }
             .onChange(of: router.openDayKind) { _, kind in openDay(kind) }
             .onChange(of: router.repeatDoseLocalID) { _, id in openRepeatDose(id) }
+            .onChange(of: router.showStash) { _, show in openStash(show) }
             .onAppear {
                 // handle a deep link that arrived before this view existed
                 showTimer(router.openTimerLocalID)
@@ -239,6 +256,7 @@ struct DashboardView: View {
                 openConvert(router.convertTarget)
                 openDay(router.openDayKind)
                 openRepeatDose(router.repeatDoseLocalID)
+                openStash(router.showStash)
                 #if DEBUG
                 if let raw = ProcessInfo.processInfo.environment["BB_OPEN"], !children.isEmpty {
                     if raw == "timer", !startingTimer {
@@ -598,8 +616,39 @@ struct DashboardView: View {
     /// Wrap a "Today" tile so tapping it pushes a single-day, single-kind timeline slice.
     private func metricLink<Content: View>(_ kind: EntityKind,
                                            @ViewBuilder _ tile: () -> Content) -> some View {
-        NavigationLink(value: kind) { tile() }
+        NavigationLink(value: DashboardRoute.day(kind)) { tile() }
             .buttonStyle(.plain)
+    }
+
+    // MARK: Milk stash
+
+    /// What's in the milk stash, and a line once some of it expires soon or has expired. Shown while
+    /// the stash holds milk or is below zero; opens the stash screen.
+    private func stashCard(_ stash: StashSummaryDTO) -> some View {
+        let balance = EntityFormatting.formatAmount(stash.balance)
+        let detail: String? = switch stash.status(at: .now) {
+        case .ok: nil
+        case .warn: "Some milk expires soon"
+        case .expired: "Some milk has expired"
+        }
+        return Button { navPath.append(.stash) } label: {
+            BBCard {
+                HStack(spacing: 12) {
+                    ActivityTile(kind: .stashAdjustment, size: 40, glyph: 21)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Stored milk").font(.headline)
+                        if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
+                    }
+                    Spacer(minLength: 8)
+                    Text(balance)
+                        .font(.title3.weight(.semibold)).monospacedDigit()
+                        .foregroundStyle(stash.balance < 0 ? BBColor.danger : Color.primary)
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(["Stored milk", balance, detail].compactMap { $0 }.joined(separator: ", "))
     }
 
     // MARK: Next dose
@@ -706,8 +755,15 @@ struct DashboardView: View {
     /// "Today" tiles).
     private func openDay(_ kind: EntityKind?) {
         guard let kind else { return }
-        navPath = [kind]
+        navPath = [.day(kind)]
         router.openDayKind = nil
+    }
+
+    /// Push the milk stash screen for `babybuddy://stash`, on a server with the milk stash.
+    private func openStash(_ show: Bool) {
+        guard show else { return }
+        router.showStash = false
+        if stashSupported { navPath = [.stash] }
     }
 
     /// Stop tapped: the timer stops now, here and (once the DELETE lands) on the server, then the
@@ -948,7 +1004,10 @@ private struct QuickAddMenu: View {
 private struct AllActivitiesSheet: View {
     @Environment(\.dismiss) private var dismiss
     var showsSickMode: Bool
+    /// Whether the server has the milk stash, so the sheet offers its screen.
+    var showsStash: Bool
     var onPick: (EntityKind) -> Void
+    var onOpenStash: () -> Void
     var onStartSickMode: () -> Void
 
     private let logKinds: [EntityKind] = [.feeding, .change, .sleep, .tummyTime, .pumping, .note]
@@ -961,6 +1020,7 @@ private struct AllActivitiesSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     section("Log", logKinds)
                     section("Measure", measureKinds)
+                    if showsStash { stashRow }
                     if showsSickMode { sickModeRow }
                 }
                 .padding()
@@ -973,6 +1033,25 @@ private struct AllActivitiesSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// The milk stash screen, where milk is added, discarded or thrown away.
+    private var stashRow: some View {
+        Button(action: onOpenStash) {
+            BBCard(cornerRadius: BBRadius.row, padding: 13) {
+                HStack(spacing: 12) {
+                    ActivityTile(kind: .stashAdjustment, size: 40, glyph: 21)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Stored milk").font(.subheadline.weight(.semibold))
+                        Text("Add, discard or throw away stored milk")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     /// Board j2: starting sick mode by hand, for when there's no fever reading to offer it.
@@ -1013,4 +1092,10 @@ private struct AllActivitiesSheet: View {
             }
         }
     }
+}
+
+/// Where Home's navigation stack goes: a kind's day timeline, or the milk stash.
+enum DashboardRoute: Hashable {
+    case day(EntityKind)
+    case stash
 }

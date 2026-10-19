@@ -67,6 +67,20 @@ multiple children run through all of it.
 | 🔒 **Locked down** | Credentials stay in your Keychain, with an optional Face ID or Touch ID lock. |
 | 🎨 **Six app icons** | Swap the Home Screen icon under **Settings → Appearance → App Icon**. |
 
+## Stored milk
+
+On a Baby Buddy server with stored milk, the app adds:
+
+- **Storing milk and using it.** A pumping session can be stored, and a breast-milk feed that
+  isn't at the breast can come from stored milk.
+- **A Stored milk screen.** The balance and the stored milk, oldest first, with when it expires.
+  Add or discard milk, or throw away the expired milk in one go.
+- **Expiry alerts.** A notification when milk expires soon and when it has expired (Settings,
+  "Stored milk expiry").
+
+On a server without it nothing changes: no stored milk screen appears and no stored milk fields
+are sent.
+
 ## Your baby's records stay with you
 
 Baby tracking data syncs only between the app and your

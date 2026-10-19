@@ -35,8 +35,10 @@ struct EntityEditorView: View {
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
 
+    /// `stashKind` and `amount` start a new milk stash entry: "Discard milk" with the expired amount.
     init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil,
-         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor) {
+         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor,
+         stashKind: StashKind = .added, amount: Double? = nil) {
         self.childID = childID
         self.entity = entity
         self.sourceTimer = sourceTimer
@@ -44,6 +46,8 @@ struct EntityEditorView: View {
         self.source = source
         _kind = State(initialValue: kind)
         _selectedChildID = State(initialValue: childID)
+        _stashKind = State(initialValue: stashKind)
+        _amount = State(initialValue: amount.map { $0 == $0.rounded() ? String(Int($0)) : String($0) } ?? "")
     }
 
     // Common fields
@@ -57,6 +61,12 @@ struct EntityEditorView: View {
     @State private var feedingType: FeedingType = .breastMilk
     @State private var feedingMethod: FeedingMethod = .leftBreast
     @State private var amount = ""
+    // Milk stash
+    @State private var stashKind: StashKind = .added
+    @State private var toStash = false
+    @State private var fromStash = false
+    @AppStorage(StashCapability.pumpingToStashKey) private var lastToStash = false
+    @AppStorage(StashCapability.bottleFromStashKey) private var lastFromStash = false
     // Diaper
     @State private var wet = true
     @State private var solid = false
@@ -102,6 +112,7 @@ struct EntityEditorView: View {
 
     private var navTitle: String {
         if isConverting { return "Convert to \(kind.displayName)" }
+        if kind == .stashAdjustment, !isEditing { return stashKind == .added ? "Add Milk" : "Discard Milk" }
         return "\(isEditing ? "Edit" : "New") \(kind.displayName)"
     }
 
@@ -273,7 +284,7 @@ struct EntityEditorView: View {
     /// Reassigning is only meaningful once a record exists (there's nothing to move yet while
     /// creating) and only offered when the family has more than one child to move it to — the
     /// same gate the Dashboard/Settings child switcher uses.
-    private var showsChildPicker: Bool { isEditing && children.count > 1 }
+    private var showsChildPicker: Bool { isEditing && children.count > 1 && kind != .stashAdjustment }
 
     @ViewBuilder private var babySection: some View {
         if showsChildPicker {
@@ -327,7 +338,7 @@ struct EntityEditorView: View {
                     pickerRow("Start", selection: $start, components: [.date, .hourAndMinute])
                     rowDivider
                     endRow
-                case .change, .note, .temperature, .medication:
+                case .change, .note, .temperature, .medication, .stashAdjustment:
                     pickerRow("Time", selection: $time, components: [.date, .hourAndMinute])
                 case .weight, .height, .headCircumference, .bmi:
                     pickerRow("Date", selection: $date, components: .date)
@@ -382,7 +393,14 @@ struct EntityEditorView: View {
                 TextField("Milestone", text: $milestone, axis: .vertical).lineLimit(1...3)
             }
         case .pumping:
-            BBCard(cornerRadius: BBRadius.tile) { fieldLabeled("Amount") { amountStepper } }
+            VStack(spacing: 12) {
+                BBCard(cornerRadius: BBRadius.tile) { fieldLabeled("Amount") { amountStepper } }
+                if StashCapability.isSupported {
+                    BBCard(cornerRadius: BBRadius.tile, padding: 0) {
+                        toggleRow("Store this milk", isOn: $toStash)
+                    }
+                }
+            }
         case .note:
             BBCard(cornerRadius: BBRadius.tile) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -405,24 +423,47 @@ struct EntityEditorView: View {
             }
         case .medication:
             medicationDetails
+        case .stashAdjustment:
+            BBCard(cornerRadius: BBRadius.tile) {
+                VStack(alignment: .leading, spacing: 16) {
+                    fieldLabeled("Milk") {
+                        BBSegmentedControl(selection: $stashKind, options: StashKind.allCases) { $0.label }
+                    }
+                    fieldLabeled("Amount") { amountStepper }
+                }
+            }
         case .timer, .child:
             EmptyView()
         }
     }
 
     private var feedingDetails: some View {
-        BBCard(cornerRadius: BBRadius.tile) {
-            VStack(alignment: .leading, spacing: 16) {
-                fieldLabeled("Type") {
-                    BBSegmentedControl(selection: $feedingType,
-                                       options: FeedingType.allCases) { $0.shortLabel }
+        VStack(spacing: 12) {
+            BBCard(cornerRadius: BBRadius.tile) {
+                VStack(alignment: .leading, spacing: 16) {
+                    fieldLabeled("Type") {
+                        BBSegmentedControl(selection: $feedingType,
+                                           options: FeedingType.allCases) { $0.shortLabel }
+                    }
+                    fieldLabeled("Method") {
+                        menuField(options: FeedingMethod.allCases, selection: $feedingMethod) { $0.label }
+                    }
+                    fieldLabeled("Amount") { amountStepper }
                 }
-                fieldLabeled("Method") {
-                    menuField(options: FeedingMethod.allCases, selection: $feedingMethod) { $0.label }
+            }
+            if canComeFromStash {
+                BBCard(cornerRadius: BBRadius.tile, padding: 0) {
+                    toggleRow("From stored milk", isOn: $fromStash)
                 }
-                fieldLabeled("Amount") { amountStepper }
             }
         }
+    }
+
+    /// Whether this feed can be marked as taken from the milk stash: the server has it, and the
+    /// feed is breast milk from a bottle (or another way than the breast) with an amount.
+    private var canComeFromStash: Bool {
+        StashCapability.isSupported && StashCapability.canComeFromStash(
+            type: feedingType, method: feedingMethod, amount: ActivityDraft.number(amount))
     }
 
     private var changeDetails: some View {
@@ -825,6 +866,10 @@ struct EntityEditorView: View {
     // MARK: Load / save
 
     private func populate() {
+        if entity == nil {
+            toStash = lastToStash
+            fromStash = lastFromStash
+        }
         if let timer = sourceTimer, entity == nil {
             // Converting: inherit the timer's start, end the activity when Stop was tapped.
             if let s = timer.payloadObject["start"] as? String, let d = APIDate.parse(s) { start = d }
@@ -845,6 +890,11 @@ struct EntityEditorView: View {
         tagNames = (p["tags"] as? [String]) ?? []
         if let t = p["type"] as? String, let ft = FeedingType(rawValue: t) { feedingType = ft }
         if let m = p["method"] as? String, let fm = FeedingMethod(rawValue: m) { feedingMethod = fm }
+        if let k = p["kind"] as? String, let sk = StashKind(rawValue: k) { stashKind = sk }
+        if entity != nil {
+            toStash = p["to_stash"] as? Bool ?? false
+            fromStash = p["from_stash"] as? Bool ?? false
+        }
         if let a = p["amount"] as? Double { amount = trimmed(a) }
         wet = p["wet"] as? Bool ?? wet
         solid = p["solid"] as? Bool ?? solid
@@ -881,6 +931,8 @@ struct EntityEditorView: View {
             return
         }
         let payload = buildPayload()
+        if kind == .pumping, StashCapability.isSupported { lastToStash = toStash }
+        if kind == .feeding, canComeFromStash { lastFromStash = fromStash }
         let repo = LocalRepository(context: context)
         let target: LocalEntity?
         if let sourceTimer {
@@ -939,6 +991,7 @@ struct EntityEditorView: View {
             p["start"] = iso(start); p["end"] = iso(end)
             p["type"] = feedingType.rawValue; p["method"] = feedingMethod.rawValue
             if let a = ActivityDraft.number(amount) { p["amount"] = a }
+            if StashCapability.isSupported { p["from_stash"] = fromStash && canComeFromStash }
             p["notes"] = notes; p["tags"] = tagList
         case .change:
             p["time"] = iso(time); p["wet"] = wet; p["solid"] = solid
@@ -953,6 +1006,7 @@ struct EntityEditorView: View {
         case .pumping:
             p["start"] = iso(start); p["end"] = iso(end)
             if let a = ActivityDraft.number(amount) { p["amount"] = a }
+            if StashCapability.isSupported { p["to_stash"] = toStash }
             p["notes"] = notes; p["tags"] = tagList
         case .note:
             p["time"] = iso(time); p["note"] = noteText; p["tags"] = tagList
@@ -970,6 +1024,11 @@ struct EntityEditorView: View {
             if let d = ActivityDraft.number(dosage) { p["dosage"] = d }
             p["dosage_unit"] = dosageUnit
             p["next_dose_interval"] = doseIntervalSeconds.map(APIDuration.string(from:)) ?? NSNull()
+            p["notes"] = notes; p["tags"] = tagList
+        case .stashAdjustment:
+            p.removeValue(forKey: "child")
+            p["time"] = iso(time); p["kind"] = stashKind.rawValue
+            p["amount"] = ActivityDraft.number(amount) ?? 0
             p["notes"] = notes; p["tags"] = tagList
         case .timer, .child:
             break

@@ -36,6 +36,7 @@ enum DemoData {
 
     @MainActor
     static func seedIfNeeded(into context: ModelContext) {
+        refreshDemoStash()
         let existing = (try? context.fetch(FetchDescriptor<LocalEntity>()))?.isEmpty ?? true
         guard existing else { return }
 
@@ -96,6 +97,9 @@ enum DemoData {
         ], context)
 
         seedHistory(into: context)
+        if ProcessInfo.processInfo.environment["BB_NO_STASH"] != "1" {
+            seedStashSources(into: context)
+        }
 
         if ProcessInfo.processInfo.environment["BB_SEED_CONFLICT"] == "1" {
             seedConflict(into: context)
@@ -390,6 +394,52 @@ enum DemoData {
             localPayload: (try? JSONSerialization.data(withJSONObject: mine)) ?? base,
             serverPayload: (try? JSONSerialization.data(withJSONObject: theirs)) ?? base,
             basePayload: base))
+    }
+
+    /// The demo server has the milk stash, unless `BB_NO_STASH=1`. Its summary is fixed relative to
+    /// now and doesn't follow what's logged in the demo: the server works the stash out.
+    private static func refreshDemoStash() {
+        let hasStash = ProcessInfo.processInfo.environment["BB_NO_STASH"] != "1"
+        StashCapability.store(summary: hasStash ? demoStashSummary(now: .now) : nil)
+    }
+
+    /// The records the demo lots came from: milk added by hand 75 hours ago, and a pumping into the
+    /// stash that ended 50 hours ago (more than its lot holds now: a bottle from the stash 20 hours
+    /// ago took some). The 6-hour lot names no source, as a server from before lot sources sends
+    /// none. ids 7000+.
+    @MainActor
+    private static func seedStashSources(into context: ModelContext) {
+        let now = Date()
+        func iso(_ hoursAgo: Double) -> String {
+            APIDate.isoDateTime.string(from: now.addingTimeInterval(-hoursAgo * 3600))
+        }
+        insert(.stashAdjustment, id: 7000, [
+            "id": 7000, "time": iso(75), "amount": 80.0, "kind": "added", "notes": "", "tags": [],
+        ], context)
+        insert(.pumping, id: 7001, [
+            "id": 7001, "child": 1, "start": iso(50.33), "end": iso(50), "amount": 160.0, "to_stash": true,
+            "notes": "", "tags": [],
+        ], context)
+        insert(.feeding, id: 7002, [
+            "id": 7002, "child": 1, "start": iso(20), "end": iso(19.83), "type": "breast milk",
+            "method": "bottle", "amount": 40.0, "from_stash": true, "notes": "", "tags": [],
+        ], context)
+    }
+
+    /// Expired, expiring and fresh milk, with the server's default age limits (48 and 72 hours).
+    static func demoStashSummary(now: Date) -> StashSummaryDTO {
+        func lot(hoursAgo: Double, amount: Double, source: StashLotSourceDTO? = nil) -> StashLotDTO {
+            let time = now.addingTimeInterval(-hoursAgo * 3600)
+            var lot = StashLotDTO(time: time, amount: amount, warn_at: time.addingTimeInterval(48 * 3600),
+                                  expires_at: time.addingTimeInterval(72 * 3600), status: .ok, source: source)
+            lot.status = lot.status(at: now)
+            return lot
+        }
+        let lots = [lot(hoursAgo: 75, amount: 80, source: .init(type: "stash_adjustment", id: 7000)),
+                    lot(hoursAgo: 50, amount: 120, source: .init(type: "pumping", id: 7001)),
+                    lot(hoursAgo: 6, amount: 150)]
+        return StashSummaryDTO(balance: 350, status: .expired, warn_age_hours: 48, max_age_hours: 72,
+                               expired_amount: 80, lots: lots)
     }
 
     private static func insert(_ kind: EntityKind, id: Int, _ obj: [String: Any], _ context: ModelContext) {
