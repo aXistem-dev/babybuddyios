@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import WidgetKit
 
 /// Server/account, offline-first sync status, app lock, and sign-out — styled to the Baby
 /// Buddy design system: a child-profile masthead over grouped white ``BBCard`` sections, each
@@ -49,6 +50,8 @@ struct SettingsView: View {
     @AppStorage(TemperatureUnit.key, store: SharedDefaults.suite) private var storedUnit: TemperatureUnit?
     @AppStorage(SickMode.feverLineKey, store: SharedDefaults.suite) private var feverLineCelsius = SickMode.defaultFeverLine
     @AppStorage(SickMode.suggestKey, store: SharedDefaults.suite) private var suggestsSickMode = true
+    // The next-feed estimate, off by default.
+    @AppStorage(FeedEstimate.Settings.enabledKey, store: SharedDefaults.suite) private var showsFeedEstimate = false
     @AppStorage(SickMode.checkHoursKey, store: SharedDefaults.suite) private var checkHours = SickMode.defaultCheckHours
 
     @State private var debugConflict: ConflictRecord?
@@ -106,6 +109,15 @@ struct SettingsView: View {
                     }
 
                     sectioned("Sick mode") { sickModeCard }
+
+                    sectioned("Feeding") {
+                        feedingCard
+                        Text("An estimate from this child\u{2019}s recent feeds, shown on Home and in the status widget. It appears once there are ten recent feeds, only while they follow a steady pattern, and until the estimated time.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.top, 2)
+                    }
 
                     sectioned("Notifications") {
                         notificationsCard
@@ -428,6 +440,21 @@ struct SettingsView: View {
                     .disabled(!lock.biometryAvailable)
             }
         }
+    }
+
+    // MARK: Feeding
+
+    /// The next-feed estimate's switch.
+    private var feedingCard: some View {
+        card {
+            SettingsRow(symbol: "clock.arrow.circlepath", tint: BBColor.activity(.feeding), title: "Next feed estimate",
+                        subtitle: "When the next feed is likely") {
+                Toggle("Next feed estimate", isOn: $showsFeedEstimate)
+                    .labelsHidden()
+                    .tint(BBColor.primary)
+            }
+        }
+        .onChange(of: showsFeedEstimate) { WidgetCenter.shared.reloadAllTimelines() }
     }
 
     // MARK: Sick mode
