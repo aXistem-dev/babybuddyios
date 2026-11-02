@@ -79,7 +79,7 @@ enum BBColor {
         case .feeding: return feeding
         case .sleep: return sleep
         case .tummyTime: return tummy
-        case .pumping: return pumping
+        case .pumping, .stashAdjustment: return pumping
         case .change: return change
         case .note: return note
         case .medication: return danger

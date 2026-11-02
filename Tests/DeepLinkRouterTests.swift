@@ -12,6 +12,13 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertEqual(router.convertTarget, .init(localID: id, kind: .feeding))
     }
 
+    /// A milk stash alert opens the stash screen.
+    func testStashLinkOpensTheStash() {
+        let router = DeepLinkRouter()
+        XCTAssertTrue(router.handle(URL(string: "babybuddy://stash")!))
+        XCTAssertTrue(router.showStash)
+    }
+
     func testTimerLinkParsesLocalID() {
         let router = DeepLinkRouter()
         let id = UUID()
