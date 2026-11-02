@@ -10,6 +10,7 @@ enum ActivityProblem: Equatable {
     case notANumber
     case noteRequired
     case medicationNameRequired
+    case activityTypeRequired
     case startAfterEnd
     case over24Hours
     case futureTimestamp
@@ -24,6 +25,7 @@ enum ActivityProblem: Equatable {
         case .notANumber:            return "That isn't a number Baby Buddy can read. Use digits, like 90 or 4.5."
         case .noteRequired:          return "Write something for this note."
         case .medicationNameRequired: return "Enter the medication name."
+        case .activityTypeRequired:  return "Choose an activity type."
         case .startAfterEnd:         return "The start time is after the end time."
         case .over24Hours:           return "Baby Buddy won't accept more than 24 hours between start and end."
         case .futureTimestamp:       return "That time is in the future — Baby Buddy only accepts times up to now."
@@ -39,9 +41,11 @@ enum ActivityProblem: Equatable {
 /// form schema: `validate_time(start)` for feeding/pumping, `validate_time(start)` *and* `(end)`
 /// for sleep/tummy time, `validate_duration` (start ≤ end, ≤ 24h) for all four, `validate_time(time)`
 /// for changes/temperature/medication (notes are exempt upstream), and `validate_date(date)` for the
-/// growth measurements. Overlap (`validate_unique_period`) is not a block here: the local cache is
-/// windowed and can be stale, so a local check would be wrong in both directions. The editor shows
-/// ``overlapping(kind:childID:start:end:excluding:in:)`` as a warning instead.
+/// growth measurements, and for activities `validate_time(start)` and `(end)` with
+/// `validate_duration` (a type without duration has its end at its start). Overlap
+/// (`validate_unique_period`) is not a block here: the local cache is windowed and can be stale, so
+/// a local check would be wrong in both directions. The editor shows
+/// ``overlapping(kind:childID:start:end:excluding:activityType:in:)`` as a warning instead.
 struct ActivityDraft {
     var kind: EntityKind
     var start = Date()
@@ -53,6 +57,10 @@ struct ActivityDraft {
     var dosage = ""
     var noteText = ""
     var medName = ""
+    /// The activity type an activity has chosen, by id; nil until one is.
+    var activityType: Int?
+    /// Whether that type tracks duration (a start and an end) rather than a single time.
+    var activityHasDuration = false
     /// Injected so the future-timestamp rules are testable against a fixed clock.
     var now = Date()
 
@@ -86,7 +94,10 @@ struct ActivityDraft {
                     ? .stashAmountRequired : .notANumber
             }
             return isFuture(time) ? .futureTimestamp : nil
-        case .timer, .child:
+        case .activity:
+            if activityType == nil { return .activityTypeRequired }
+            return activityHasDuration ? durationProblem(futureEnd: true) : (isFuture(time) ? .futureTimestamp : nil)
+        case .timer, .child, .activityType:
             return nil // not editable in this form
         }
     }
@@ -128,18 +139,22 @@ struct ActivityDraft {
     // MARK: Overlap
 
     /// The kinds Baby Buddy refuses to let overlap another of the same kind for the same child
-    /// (`validate_unique_period` in each model's `clean()`).
-    static let overlapCheckedKinds: Set<EntityKind> = [.feeding, .sleep, .tummyTime, .pumping]
+    /// (`validate_unique_period` in each model's `clean()`); activities only overlap others of the
+    /// same type.
+    static let overlapCheckedKinds: Set<EntityKind> = [.feeding, .sleep, .tummyTime, .pumping, .activity]
 
     /// The first cached record that `start...end` intersects, by upstream's test
     /// (`start < other.end && end > other.start`, so touching ends don't count). `excluding` is the
-    /// record being edited; records waiting to be deleted are ignored.
+    /// record being edited; records waiting to be deleted are ignored. `activityType` is an
+    /// activity's type id: only activities of that type count.
     static func overlapping(kind: EntityKind, childID: Int, start: Date, end: Date,
-                            excluding: UUID?, in records: [LocalEntity]) -> LocalEntity? {
+                            excluding: UUID?, activityType: Int? = nil,
+                            in records: [LocalEntity]) -> LocalEntity? {
         guard overlapCheckedKinds.contains(kind), start < end else { return nil }
         return records.first { record in
             guard record.kind == kind, record.childID == childID, record.localID != excluding,
                   record.syncState != .pendingDelete,
+                  kind != .activity || record.payloadObject["type"] as? Int == activityType,
                   let range = period(of: record) else { return false }
             return range.lowerBound < end && range.upperBound > start
         }

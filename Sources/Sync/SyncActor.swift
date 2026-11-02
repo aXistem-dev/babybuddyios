@@ -42,6 +42,7 @@ actor SyncActor {
         // First, so the kinds below know whether to pull milk stash entries.
         let root = await fetchRoot(client: client)
         if await refreshStash(root: root, client: client) { changed = true }
+        if refreshActivities(root: root) { changed = true }
         var serverError: APIError?   // last 5xx seen; surfaced only if *every* kind fails this way
         var pulledAnyKind = false
         for kind in EntityKind.syncedKinds {
@@ -82,6 +83,7 @@ actor SyncActor {
         if !pulledAnyKind, let serverError {
             return Self.fail(serverError, endpoint: "all", changed: changed)
         }
+        if await refreshActivityTypes(client: client) { changed = true }
         return PullOutcome(error: nil, changed: changed)
     }
 
@@ -124,6 +126,32 @@ actor SyncActor {
             Analytics.error(network: "pull-stash")
         }
         return StashCapability.summary != previous
+    }
+
+    /// Refresh whether the server has activities from its API root (nil: unread, so what was known
+    /// stays), before the kinds are pulled, so a server without them isn't asked for routes it
+    /// doesn't have. Returns whether it changed, so the pull counts as a change and what shows
+    /// activities refreshes.
+    private func refreshActivities(root: Data?) -> Bool {
+        let hadActivities = ActivitiesCapability.isSupported
+        if let root { ActivitiesCapability.update(rootJSON: root) }
+        return ActivitiesCapability.isSupported != hadActivities
+    }
+
+    /// Cache the pulled activity types for the rows that show an activity, and what this user may do
+    /// with them (the `permissions` of the type list's first page). See ``ActivitiesCapability``.
+    /// Returns whether any of it changed, so a rename shows without new activities.
+    private func refreshActivityTypes(client: APIClient) async -> Bool {
+        guard ActivitiesCapability.isSupported else { return false }
+        let before = ActivitiesCapability.types
+        let permissions = ActivitiesCapability.permissions
+        let types = LocalStore.fetch(kind: .activityType, in: modelContext)
+        ActivitiesCapability.store(typesIn: types)
+        // A failed request keeps the permissions this phone last had.
+        if let page = try? await client.getRawPath(ActivitiesCapability.typeListPath) {
+            ActivitiesCapability.store(permissions: ActivitiesCapability.permissions(fromListJSON: page))
+        }
+        return ActivitiesCapability.types != before || ActivitiesCapability.permissions != permissions
     }
 
     /// Report a pull failure and turn it into the outcome the caller surfaces. `endpoint` is the

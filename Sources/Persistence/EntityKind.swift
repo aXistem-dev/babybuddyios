@@ -21,6 +21,12 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     /// Milk added to the milk stash or discarded from it by hand. Only on servers with the milk
     /// stash; see `StashCapability`.
     case stashAdjustment
+    /// A user-defined activity type ("Bath", "Walk"). Only on servers with activities; see
+    /// `ActivitiesCapability`. Types are data from the server: the app never names any.
+    case activityType
+    /// Something done with a child, of one ``activityType`` (referenced by its id): a single moment,
+    /// or a start and end when the type tracks duration.
+    case activity
 
     var id: String { rawValue }
 
@@ -42,6 +48,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .bmi: return "bmi"
         case .medication: return "medication"
         case .stashAdjustment: return "stash-adjustments"
+        case .activityType: return "activity-types"
+        case .activity: return "activities"
         }
     }
 
@@ -49,10 +57,13 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     /// and as the `ordering` field on list requests.
     var timeField: String {
         switch self {
-        case .feeding, .sleep, .tummyTime, .pumping, .timer: return "start"
+        case .feeding, .sleep, .tummyTime, .pumping, .timer, .activity: return "start"
         case .change, .note, .temperature, .medication, .stashAdjustment: return "time"
         case .weight, .height, .headCircumference, .bmi: return "date"
         case .child: return "birth_date"
+        // Activity types have no timestamp: `timestamp(from:)` falls back to `.distantPast`, and
+        // ordering by the server's own order keeps the list request valid.
+        case .activityType: return "order"
         }
     }
 
@@ -60,13 +71,14 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     /// "load older" paging). Children and timers are low-volume metadata; the growth
     /// measurements are infrequent *and* the API exposes no range filter for them
     /// (`filterset_fields = ("child", "date")` — exact match only), so all four are always
-    /// pulled in full. The remaining high-volume event kinds are windowed.
+    /// pulled in full. The remaining high-volume event kinds are windowed, activities among them
+    /// (on `start`, like tummy time); activity types are metadata.
     var isWindowed: Bool {
         switch self {
         case .feeding, .change, .sleep, .tummyTime, .pumping, .note, .temperature, .medication,
-             .stashAdjustment:
+             .stashAdjustment, .activity:
             return true
-        case .child, .timer, .weight, .height, .headCircumference, .bmi:
+        case .child, .timer, .weight, .height, .headCircumference, .bmi, .activityType:
             return false
         }
     }
@@ -98,6 +110,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .bmi: return "BMI"
         case .medication: return "Medication"
         case .stashAdjustment: return "Stored Milk Entry"
+        case .activityType: return "Activity Type"
+        case .activity: return "Activity"
         }
     }
 
@@ -118,6 +132,8 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
         case .bmi: return "chart.bar"
         case .medication: return "pills.fill"
         case .stashAdjustment: return "refrigerator"
+        case .activityType: return "square.grid.2x2"
+        case .activity: return "sparkles"
         }
     }
 
@@ -132,15 +148,22 @@ enum EntityKind: String, Codable, CaseIterable, Identifiable {
     }
 
     /// The kinds a sync pulls: milk stash entries only while the server has the milk stash for this
-    /// user, so a server without it, or a user it refuses the stash to, never fails the pull on them.
+    /// user, and the activity kinds only on a server with activities, so a server without them, or a
+    /// user it refuses the stash to, never fails the pull on routes it doesn't have or show.
     static var syncedKinds: [EntityKind] {
-        allCases.filter { $0 != .stashAdjustment || StashCapability.isSupported }
+        allCases.filter { kind in
+            switch kind {
+            case .stashAdjustment: return StashCapability.isSupported
+            case .activityType, .activity: return ActivitiesCapability.isSupported
+            default: return true
+            }
+        }
     }
 
-    /// Kinds shown in the merged activity timeline (excludes Child, which is metadata, and milk
-    /// stash entries, which belong to the milk stash screen).
+    /// Kinds shown in the merged activity timeline (excludes Child and Activity Type, which are
+    /// metadata, and milk stash entries, which belong to the milk stash screen).
     static var timelineKinds: [EntityKind] {
-        [.feeding, .change, .sleep, .tummyTime, .pumping, .note, .temperature,
+        [.feeding, .change, .sleep, .tummyTime, .pumping, .activity, .note, .temperature,
          .medication, .weight, .height, .headCircumference, .bmi]
     }
 

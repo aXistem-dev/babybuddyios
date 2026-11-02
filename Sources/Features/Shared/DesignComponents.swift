@@ -20,6 +20,8 @@ struct ActivityTile: View {
     var scalesWithType: Bool = true
     /// Replaces the kind's activity color, as a medicine's own color does in sick mode.
     var color: Color? = nil
+    /// Replaces the kind's glyph, as an activity type's emoji or icon does.
+    var icon: ActivityIcon? = nil
 
     /// Growth is capped so the 2-column metric grid and the timeline rail don't blow out.
     private var scale: CGFloat { scalesWithType ? min(typeScale, 1.6) : 1 }
@@ -30,7 +32,13 @@ struct ActivityTile: View {
         RoundedRectangle(cornerRadius: side * 0.29, style: .continuous)
             .fill(color.opacity(scheme == .dark ? 0.22 : 0.15))
             .frame(width: side, height: side)
-            .overlay { kind.icon(glyph * scale).foregroundStyle(color) }
+            .overlay {
+                if let icon {
+                    icon.view(glyph * scale).foregroundStyle(color)
+                } else {
+                    kind.icon(glyph * scale).foregroundStyle(color)
+                }
+            }
     }
 }
 
@@ -43,15 +51,23 @@ struct ActivityTile: View {
 struct ActivityPickTile: View {
     @Environment(\.colorScheme) private var scheme
     let kind: EntityKind
+    /// Replace the kind's name and glyph, as an activity type's do.
+    var title: String? = nil
+    var icon: ActivityIcon? = nil
+    /// Replaces the kind's color, as an activity type's does.
+    var color: Color? = nil
     let isSelected: Bool
     var action: () -> Void
 
     var body: some View {
-        let color = BBColor.activity(kind)
+        let color = color ?? BBColor.activity(kind)
         Button(action: action) {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .top) {
-                    kind.icon(24).foregroundStyle(color)
+                    Group {
+                        if let icon { icon.view(24) } else { kind.icon(24) }
+                    }
+                    .foregroundStyle(color)
                     Spacer(minLength: 0)
                     ZStack {
                         Circle().fill(color).frame(width: 20, height: 20)
@@ -61,7 +77,7 @@ struct ActivityPickTile: View {
                     .opacity(isSelected ? 1 : 0)
                 }
                 Spacer(minLength: 14)
-                Text(kind.displayName)
+                Text(title ?? kind.displayName)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.primary)
             }
@@ -161,9 +177,9 @@ struct EventRow: View {
     var body: some View {
         BBCard(cornerRadius: BBRadius.row, padding: 13) {
             HStack(spacing: 12) {
-                ActivityTile(kind: entity.kind, size: 40, glyph: 21)
+                ActivityTile(kind: entity.kind, size: 40, glyph: 21, color: entity.tileColor, icon: entity.tileIcon)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(entity.kind.displayName).font(.subheadline.weight(.semibold))
+                    Text(EntityFormatting.title(entity)).font(.subheadline.weight(.semibold))
                     if let subtitle = EntityFormatting.subtitle(entity, unit: unit ?? .region), !subtitle.isEmpty {
                         Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }

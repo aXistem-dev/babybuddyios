@@ -201,6 +201,8 @@ final class AppSession {
     private func clearLocalData() {
         // Whether the server has the milk stash, and its summary, belong to the server being left.
         StashCapability.reset()
+        // Whether the server has activities, and its activity types, belong to the server being left.
+        ActivitiesCapability.reset()
         guard let context else { return }
         LocalStore.wipe(in: context)
         WidgetCenter.shared.reloadAllTimelines()
