@@ -8,6 +8,10 @@ import UserNotifications
 /// the simulator without a live Baby Buddy server. Activated by launching with the
 /// environment variable `BB_DEMO=1`.
 enum DemoData {
+    /// `BB_SEED_STEADY_FEEDS=1`: seed a steady 3-hourly feeding history around the clock in place of
+    /// the usual feeds, so the next-feed estimate shows whatever the time of day (its UI test).
+    private static var steadyFeeds: Bool { ProcessInfo.processInfo.environment["BB_SEED_STEADY_FEEDS"] == "1" }
+
     /// `BB_UITEST=1`: start a UI-test launch from a clean install, so no test inherits another's
     /// records, settings, nudge counters, sign-in or pending notifications. The store and the
     /// defaults otherwise persist across launches on the simulator, and demo data is only seeded
@@ -56,15 +60,18 @@ enum DemoData {
             LocalStore.upsertTag(dto, in: context)
         }
 
-        insert(.feeding, id: 10, [
-            "id": 10, "child": 1, "start": iso(90), "end": iso(70),
-            "type": "breast milk", "method": "left breast", "amount": NSNull(),
-            "tags": ["hungry", "night"],
-        ], context)
-        insert(.feeding, id: 11, [
-            "id": 11, "child": 1, "start": iso(330), "end": iso(310),
-            "type": "formula", "method": "bottle", "amount": 90, "tags": [],
-        ], context)
+        // `BB_SEED_STEADY_FEEDS=1`: the feeds are a steady 3-hourly pattern instead (see seedHistory).
+        if !steadyFeeds {
+            insert(.feeding, id: 10, [
+                "id": 10, "child": 1, "start": iso(90), "end": iso(70),
+                "type": "breast milk", "method": "left breast", "amount": NSNull(),
+                "tags": ["hungry", "night"],
+            ], context)
+            insert(.feeding, id: 11, [
+                "id": 11, "child": 1, "start": iso(330), "end": iso(310),
+                "type": "formula", "method": "bottle", "amount": 90, "tags": [],
+            ], context)
+        }
         insert(.change, id: 20, [
             "id": 20, "child": 1, "time": iso(45), "wet": true, "solid": false,
             "color": "", "tags": [],
@@ -291,9 +298,23 @@ enum DemoData {
             ("fortified breast milk", "bottle", true),
         ]
 
+        if steadyFeeds {
+            // A feed every 3 hours around the clock for 5 days, the newest an hour ago: a pattern
+            // steady enough for the next-feed estimate at any time of day.
+            for hoursAgo in stride(from: 1.0, through: 5 * 24, by: 3) {
+                let start = Date().addingTimeInterval(-hoursAgo * 3_600)
+                insert(.feeding, id: nextID, [
+                    "id": nextID, "child": 1, "start": APIDate.isoDateTime.string(from: start),
+                    "end": APIDate.isoDateTime.string(from: start.addingTimeInterval(15 * 60)),
+                    "type": "breast milk", "method": "left breast", "amount": NSNull(), "tags": [],
+                ], context)
+                nextID += 1
+            }
+        }
+
         for daysAgo in 1...30 {
-            // Feedings: 5–7 spread across the waking day.
-            let feedCount = 5 + (daysAgo % 3)
+            // Feedings: 5–7 spread across the waking day (none with `BB_SEED_STEADY_FEEDS=1`).
+            let feedCount = steadyFeeds ? 0 : 5 + (daysAgo % 3)
             for f in 0..<feedCount {
                 let hour = 6.5 + Double(f) * (15.0 / Double(feedCount))
                 let (type, method, hasAmount) = feedKinds[(daysAgo + f) % feedKinds.count]

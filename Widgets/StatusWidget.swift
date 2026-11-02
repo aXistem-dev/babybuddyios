@@ -40,20 +40,26 @@ struct StatusProvider: TimelineProvider {
         // Relative times refresh themselves via `Text(_, style: .relative)`; the counts are
         // computed here, so ask WidgetKit to refresh in ~30 min to keep them (and the midnight
         // rollover) current. The app also reloads timelines whenever it writes a record.
+        // A next-feed estimate leaves the tile once its time has passed, so that time gets an entry too.
         let entry = StatusEntry(date: .now, status: Self.currentStatus())
         let next = Date.now.addingTimeInterval(30 * 60)
-        completion(Timeline(entries: [entry], policy: .after(next)))
+        var entries = [entry]
+        if let feedTime = entry.status.nextFeed?.next, feedTime < next {
+            let after = feedTime.addingTimeInterval(1)
+            entries.append(StatusEntry(date: after, status: Self.currentStatus(now: after)))
+        }
+        completion(Timeline(entries: entries, policy: .after(next)))
     }
 
     /// Status of the selected child from the shared store, or `.unavailable` if none/no store.
-    static func currentStatus() -> ChildStatus {
+    static func currentStatus(now: Date = .now) -> ChildStatus {
         guard let container = try? ModelContainer(
             for: LocalStore.schema,
             configurations: ModelConfiguration(schema: LocalStore.schema, url: LocalStore.storeURL))
         else { return .unavailable }
         let context = ModelContext(container)
         let entities = (try? context.fetch(FetchDescriptor<LocalEntity>())) ?? []
-        return ChildStatus.compute(from: entities, childID: SharedDefaults.selectedChildID)
+        return ChildStatus.compute(from: entities, childID: SharedDefaults.selectedChildID, now: now)
     }
 }
 
@@ -218,8 +224,9 @@ struct StatusWidgetView: View {
             Text(lastAge(s))
                 .font(.system(size: 18, weight: .semibold)).foregroundStyle(.primary)
                 .lineLimit(1).minimumScaleFactor(0.6)
-            Text("\(s.todayCount) today")
-                .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            // The feeding tile shows the next-feed estimate in place of today's count, when there is one.
+            Text(s.kind == .feeding ? status.nextFeed?.shortText ?? "\(s.todayCount) today" : "\(s.todayCount) today")
+                .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(11)

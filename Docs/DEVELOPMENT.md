@@ -81,6 +81,7 @@ Pass these via `SIMCTL_CHILD_<NAME>` environment variables to `xcrun simctl laun
 | `BB_NUDGE=gentle\|milestone\|banner` | Force a support-nudge surface on the Dashboard |
 | `BB_TIMER_ALERT_SECONDS=<n>` | Turn forgotten-timer alerts on and fire them `n` seconds after a timer starts, whatever Settings says |
 | `BB_DOSE_ALERT_SECONDS=<n>` | Turn medication reminders on and shorten every next-dose interval to `n` seconds (the editor's shortest is 4 h) |
+| `BB_SEED_STEADY_FEEDS=1` | With `BB_DEMO`, seed a feed every 3 hours around the clock for 5 days instead of the usual feeds, so the next-feed estimate shows at any time of day |
 | `BB_TOAST_SECONDS=<n>` | Hold the undo toast open for `n` seconds instead of 5 |
 | `BB_FEEDBACK=<url>` | Point Settings ▸ Feedback ▸ Send Feedback at another Quackback server instead of feedback.babybuddy.app. The UI tests pass an unreachable one to reach the Mail fallback |
 | `BB_FEEDBACK_STUB=signed-out\|signed-in` | With `BB_UITEST`, the feedback sheet and its sign-in use stubs instead of the server. The widget is a small inline page that shows the view the app asks for and reports a user (before `ready`, as Quackback does) only while the web view holds a session cookie. The sign-in calls answer locally: an email starting `busy@` hits the rate limit, the code `000000` and the password `wrong` are refused, and anything else signs in. `signed-in` starts the launch with a stub session. UI tests that open the sheet use it, so they need no network |
